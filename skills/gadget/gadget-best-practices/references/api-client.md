@@ -91,6 +91,8 @@ const posts = await api.post.findMany({
 });
 ```
 
+Filtering by a field requires a field to be indexed for filter/sort
+
 ## Sorting
 
 ```javascript
@@ -100,6 +102,20 @@ await api.post.findMany({
   },
 });
 ```
+
+Sorting on a field requires a field to be indexed for filter/sort
+
+## Searching
+
+Gadget APIs have Elasticsearch built-in:
+
+```javascript
+const records = await api.post.findMany({
+  search: "birds of antarctica",
+});
+```
+
+Searching requires fields to be indexed for search.
 
 ## Creating Records
 
