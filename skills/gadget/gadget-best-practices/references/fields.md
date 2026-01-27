@@ -120,30 +120,85 @@ See [Gelly documentation](https://docs.gadget.dev/reference/gelly) for syntax.
 
 **Singular for belongsTo and hasOne:**
 
-```javascript
-belongsTo user
-belongsTo author
-hasOne profile
+```typescript
+import type { GadgetModel } from "gadget-server";
+
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Def345GhiJkl",
+  fields: {
+    user: {
+      type: "belongsTo",
+      parent: { model: "user" },
+      storageKey: "Mno678PqrStu",
+    },
+    author: {
+      type: "belongsTo",
+      parent: { model: "user" },
+      storageKey: "Vwx901YzaBcd",
+    },
+    profile: {
+      type: "hasOne",
+      child: { model: "profile", belongsToField: "user" },
+      storageKey: "Efg234HijKlm",
+    },
+  },
+};
 ```
 
 **Plural for hasMany and hasManyThrough:**
 
-```javascript
-hasMany comments
-hasMany orders
-hasManyThrough tags
+```typescript
+import type { GadgetModel } from "gadget-server";
+
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Nop567QrsTuv",
+  fields: {
+    comments: {
+      type: "hasMany",
+      children: { model: "comment", belongsToField: "post" },
+      storageKey: "Wxy890ZabCde",
+    },
+    orders: {
+      type: "hasMany",
+      children: { model: "order", belongsToField: "customer" },
+      storageKey: "Fgh123IjkLmn",
+    },
+    tags: {
+      type: "hasManyThrough",
+      sibling: { model: "tag", relatedField: "posts" },
+      join: {
+        model: "postTag",
+        belongsToSelfField: "post",
+        belongsToSiblingField: "tag",
+      },
+      storageKey: "Opq456RstUvw",
+    },
+  },
+};
 ```
 
 **No "Id" suffix for belongsTo:**
 
 ❌ Don't do this:
-```javascript
-belongsTo userId  // Wrong!
+```typescript
+// Wrong - don't add "Id" suffix to relationship names
+userId: {
+  type: "belongsTo",
+  parent: { model: "user" },
+  storageKey: "Xyz789AbcDef",
+}
 ```
 
 ✅ Do this:
-```javascript
-belongsTo user  // API returns full record
+```typescript
+// Correct - use the model name directly
+user: {
+  type: "belongsTo",
+  parent: { model: "user" },
+  storageKey: "Ghi012JklMno",
+}
 // GraphQL automatically provides both:
 // - user (full record)
 // - userId (just the ID)
@@ -243,20 +298,36 @@ export default async ({
 
 **Example:**
 
-```
-// ❌ Don't store derived data
-model order {
-  field subtotal: Number
-  field tax: Number
-  field total: Number  // Derived from subtotal + tax
-}
+```typescript
+// ❌ Don't store derived data - api/models/order/schema.gadget.ts
+import type { GadgetModel } from "gadget-server";
 
-// ✅ Calculate or use Computed field
-model order {
-  field subtotal: Number
-  field tax: Number
-  field total: Computed [ subtotal + tax ]
-}
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Pqr345StuVwx",
+  fields: {
+    subtotal: { type: "number", decimals: 2, storageKey: "Yza678BcdEfg" },
+    tax: { type: "number", decimals: 2, storageKey: "Hij901KlmNop" },
+    total: { type: "number", decimals: 2, storageKey: "Qrs234TuvWxy" },  // Derived - don't store!
+  },
+};
+
+// ✅ Calculate or use Computed field - api/models/order/schema.gadget.ts
+import type { GadgetModel } from "gadget-server";
+
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Zab567CdeFgh",
+  fields: {
+    subtotal: { type: "number", decimals: 2, storageKey: "Ijk890LmnOpq" },
+    tax: { type: "number", decimals: 2, storageKey: "Rst123UvwXyz" },
+    total: {
+      type: "computed",
+      sourceFile: "api/models/order/fields/total.gelly",
+      storageKey: "Abc456DefGhi",
+    },
+  },
+};
 ```
 
 ## Field Migration Workflow

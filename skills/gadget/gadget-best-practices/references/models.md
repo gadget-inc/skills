@@ -99,25 +99,53 @@ If a requirement says "users can publish posts and see analytics", the model nee
 
 **Examples:**
 
-```
-// ❌ Over-engineered
-model location
-model locationType { // Just to store "retail" or "wholesale"
-  hasMany locations
-}
+```typescript
+// ❌ Over-engineered - separate model just to store "retail" or "wholesale"
+// api/models/locationType/schema.gadget.ts
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Abc123DefGhi",
+  fields: {
+    locations: {
+      type: "hasMany",
+      children: { model: "location", belongsToField: "locationType" },
+      storageKey: "Jkl456MnoPqr",
+    },
+  },
+};
 
-// ✅ Simple and pragmatic
-model location {
-  field type: Enum { retail, wholesale }
-}
+// ✅ Simple and pragmatic - use enum field instead
+// api/models/location/schema.gadget.ts
+import type { GadgetModel } from "gadget-server";
+
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Stu789VwxYza",
+  fields: {
+    type: {
+      type: "enum",
+      options: ["retail", "wholesale"],
+      storageKey: "Bcd012EfgHij",
+    },
+  },
+};
 ```
 
-```
-// ❌ Over-engineered
-model userActivity { // Just for analytics
-  field action: String
-  belongsTo user
-}
+```typescript
+// ❌ Over-engineered - model just for analytics
+// api/models/userActivity/schema.gadget.ts
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Klm345NopQrs",
+  fields: {
+    action: { type: "string", storageKey: "Tuv678WxyZab" },
+    user: {
+      type: "belongsTo",
+      parent: { model: "user" },
+      storageKey: "Cde901FghIjk",
+    },
+  },
+};
 
 // ✅ Use Gadget's built-in audit logs and analytics
 // No model needed!
@@ -129,36 +157,73 @@ model userActivity { // Just for analytics
 
 Avoid duplication - normalize relationships:
 
-```
-// ❌ Denormalized
-model order {
-  field customerName: String
-  field customerEmail: String
-  field customerPhone: String
-}
+```typescript
+// ❌ Denormalized - api/models/order/schema.gadget.ts
+import type { GadgetModel } from "gadget-server";
 
-// ✅ Normalized
-model order {
-  belongsTo customer
-}
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Lmn456OpqRst",
+  fields: {
+    customerName: { type: "string", storageKey: "Uvw789XyzAbc" },
+    customerEmail: { type: "string", storageKey: "Def012GhiJkl" },
+    customerPhone: { type: "string", storageKey: "Mno345PqrStu" },
+  },
+};
 
-model customer {
-  field name: String
-  field email: String
-  field phone: String
-}
+// ✅ Normalized - api/models/order/schema.gadget.ts
+import type { GadgetModel } from "gadget-server";
+
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Vwx678YzaBC",
+  fields: {
+    customer: {
+      type: "belongsTo",
+      parent: { model: "customer" },
+      storageKey: "Def901GhiJkl",
+    },
+  },
+};
+
+// api/models/customer/schema.gadget.ts
+import type { GadgetModel } from "gadget-server";
+
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Mno234PqrStu",
+  fields: {
+    name: { type: "string", storageKey: "Vwx567YzaBcd" },
+    email: { type: "email", storageKey: "Efg890HijKlm" },
+    phone: { type: "string", storageKey: "Nop123QrsTuv" },
+  },
+};
 ```
 
 ### But Be Pragmatic
 
 Sometimes denormalization is OK for performance:
 
-```
-// ✅ Acceptable for fast queries
-model order {
-  belongsTo customer
-  field customerEmailId: String // Cached for quick access
-}
+```typescript
+// ✅ Acceptable for fast queries - api/models/order/schema.gadget.ts
+import type { GadgetModel } from "gadget-server";
+
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Wxy456ZabCde",
+  fields: {
+    customer: {
+      type: "belongsTo",
+      parent: { model: "customer" },
+      storageKey: "Fgh789IjkLmn",
+    },
+    customerEmail: {
+      type: "string",
+      storageKey: "Opq012RstUvw",
+      comment: "Cached for quick access",
+    },
+  },
+};
 ```
 
 ## JSON vs Models
@@ -208,27 +273,73 @@ field locationType: Enum { retail, wholesale }
 ✅ Options that change over time
 ✅ Options with additional data
 
-```
+```typescript
 // ❌ Don't use a model for simple states
-model orderStatus { name: String }
-model order { belongsTo orderStatus }
+// api/models/orderStatus/schema.gadget.ts
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Xyz123AbcDef",
+  fields: {
+    name: { type: "string", storageKey: "Ghi456JklMno" },
+  },
+};
+// api/models/order/schema.gadget.ts
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Pqr789StuVwx",
+  fields: {
+    orderStatus: {
+      type: "belongsTo",
+      parent: { model: "orderStatus" },
+      storageKey: "Yza012BcdEfg",
+    },
+  },
+};
 
-// ✅ Use enum
-model order {
-  field status: Enum { pending, shipped, delivered }
-}
+// ✅ Use enum instead - api/models/order/schema.gadget.ts
+import type { GadgetModel } from "gadget-server";
+
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Hij345KlmNop",
+  fields: {
+    status: {
+      type: "enum",
+      options: ["pending", "shipped", "delivered"],
+      storageKey: "Qrs678TuvWxy",
+    },
+  },
+};
 
 // ✅ DO use a model when options have rich data
-model product {
-  belongsTo category
-}
+// api/models/product/schema.gadget.ts
+import type { GadgetModel } from "gadget-server";
 
-model category {
-  field name: String
-  field description: RichText
-  field displayOrder: Number
-  field icon: File
-}
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Zab901CdeFgh",
+  fields: {
+    category: {
+      type: "belongsTo",
+      parent: { model: "category" },
+      storageKey: "Ijk234LmnOpq",
+    },
+  },
+};
+
+// api/models/category/schema.gadget.ts
+import type { GadgetModel } from "gadget-server";
+
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Rst567UvwXyz",
+  fields: {
+    name: { type: "string", storageKey: "Abc890DefGhi" },
+    description: { type: "richText", storageKey: "Jkl123MnoPqr" },
+    displayOrder: { type: "number", storageKey: "Stu456VwxYza" },
+    icon: { type: "file", storageKey: "Bcd789EfgHij" },
+  },
+};
 ```
 
 ## Default Values
@@ -238,16 +349,40 @@ When specifying default values:
 ✅ Use `null` for empty states (not empty strings or zero dates)
 ✅ Use meaningful defaults when they make sense
 
-```javascript
-// ❌ Don't default to empty strings
-field name: String { default: "" }
+```typescript
+import type { GadgetModel } from "gadget-server";
 
-// ✅ Use null for unknown values
-field name: String { default: null }
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Klm012NopQrs",
+  fields: {
+    // ❌ Don't default to empty strings
+    name: {
+      type: "string",
+      default: "",  // Wrong!
+      storageKey: "Tuv345WxyZab",
+    },
 
-// ✅ Use meaningful defaults
-field status: Enum { default: "draft" }
-field viewCount: Number { default: 0 }
+    // ✅ Use null for unknown values (omit default or set explicitly)
+    title: {
+      type: "string",
+      storageKey: "Cde678FghIjk",
+    },
+
+    // ✅ Use meaningful defaults
+    status: {
+      type: "enum",
+      options: ["draft", "published", "archived"],
+      default: "draft",
+      storageKey: "Lmn901OpqRst",
+    },
+    viewCount: {
+      type: "number",
+      default: 0,
+      storageKey: "Uvw234XyzAbc",
+    },
+  },
+};
 ```
 
 ## Built-In Model Modifications

@@ -36,13 +36,17 @@ Permissions are configured in `accessControl/permissions.gadget.ts`. This file i
 The file structure uses roles as the top-level keys, with permissions defined per model:
 
 ```typescript
-import type { GadgetAccessControl } from "gadget-server";
+import type { GadgetPermissions } from "gadget-server";
 
-export const accessControl: GadgetAccessControl = {
-  type: "gadget/access-control/v1",
+export const permissions: GadgetPermissions = {
+  type: "gadget/permissions/v1",
   roles: {
     "signed-in": {
       storageKey: "signed-in",
+      default: {
+        read: true,
+        action: true,
+      },
       models: {
         post: {
           read: true,  // Grant read permission
@@ -122,17 +126,32 @@ Every multi-tenant model needs:
 1. **`belongsTo` to tenancy model** (e.g., `shop`, `organization`, `user`)
 2. Gelly **permission filter** on that field
 
-```javascript
-model product {
-  belongsTo shop: ShopifyShop
-}
+```typescript
+// api/models/product/schema.gadget.ts
+import type { GadgetModel } from "gadget-server";
+
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Cde789FghIjk",
+  fields: {
+    shop: {
+      type: "belongsTo",
+      parent: { model: "shopifyShop" },
+      storageKey: "Lmn012OpqRst",
+    },
+  },
+};
 ```
 
 ```typescript
-// In permissions.gadget.ts
+// In accessControl/permissions.gadget.ts
 roles: {
   "shopify-app-users": {
     storageKey: "shopify-app-users",
+    default: {
+      read: false,
+      action: false,
+    },
     models: {
       product: {
         read: { filter: "accessControl/filters/product/shop-tenant.gelly" }
@@ -149,25 +168,52 @@ roles: {
 Prefer direct relationships over traversing:
 
 ✅ **Good:**
-```javascript
-model comment {
-  belongsTo shop: ShopifyShop  // Direct
-}
+```typescript
+// api/models/comment/schema.gadget.ts
+import type { GadgetModel } from "gadget-server";
+
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Uvw345XyzAbc",
+  fields: {
+    shop: {
+      type: "belongsTo",
+      parent: { model: "shopifyShop" },
+      storageKey: "Def678GhiJkl",  // Direct relationship
+    },
+  },
+};
 ```
 
 ```gelly
-filter shopId == $tenant.id
+filter ($session: Session) on Comment [
+  where shopId == $session.shopId
+]
 ```
 
 ❌ **Avoid:**
-```javascript
-model comment {
-  belongsTo post: Post  // Indirect
-}
+```typescript
+// api/models/comment/schema.gadget.ts
+import type { GadgetModel } from "gadget-server";
+
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Mno901PqrStu",
+  fields: {
+    post: {
+      type: "belongsTo",
+      parent: { model: "post" },
+      storageKey: "Vwx234YzaBcd",  // Indirect - no direct shop
+    },
+  },
+};
 ```
 
 ```gelly
-filter post.shopId == $tenant.id  // Slower
+// Slower - traverses relationship
+filter ($session: Session) on Comment [
+  where post.shopId == $session.shopId
+]
 ```
 
 ## Internal API
@@ -186,13 +232,17 @@ const allPosts = await api.internal.post.findMany();
 ## Example: Blog App
 
 ```typescript
-import type { GadgetAccessControl } from "gadget-server";
+import type { GadgetPermissions } from "gadget-server";
 
-export const accessControl: GadgetAccessControl = {
-  type: "gadget/access-control/v1",
+export const permissions: GadgetPermissions = {
+  type: "gadget/permissions/v1",
   roles: {
     unauthenticated: {
       storageKey: "unauthenticated",
+      default: {
+        read: false,
+        action: false,
+      },
       models: {
         user: {
           actions: {
@@ -207,6 +257,10 @@ export const accessControl: GadgetAccessControl = {
     },
     "signed-in": {
       storageKey: "signed-in",
+      default: {
+        read: true,
+        action: true,
+      },
       models: {
         user: {
           read: { filter: "accessControl/filters/user/tenant.gelly" },
@@ -226,6 +280,10 @@ export const accessControl: GadgetAccessControl = {
     },
     admin: {
       storageKey: "admin",
+      default: {
+        read: true,
+        action: true,
+      },
       models: {
         post: {
           read: true,

@@ -17,7 +17,7 @@ Relationships connect models together, like foreign keys in SQL.
 
 Example: `schema.gadget.ts` on a `comment` model, where `comment` belongsTo `post`:
 
-```javascript
+```typescript
 import type { GadgetModel } from "gadget-server";
 
 export const schema: GadgetModel = {
@@ -31,12 +31,11 @@ export const schema: GadgetModel = {
     },
   },
 };
-
 ```
 
 ## hasOne - One to One
 
-Example: `schema.gadget.ts` on a `post` model, where `post` hasOne `author`:
+Example: `schema.gadget.ts` on a `user` model, where `user` hasOne `profile`:
 
 ```typescript
 import type { GadgetModel } from "gadget-server";
@@ -45,37 +44,35 @@ export const schema: GadgetModel = {
   type: "gadget/model-schema/v2",
   storageKey: "M4tc9dEo5QAi",
   fields: {
-    author: {
+    profile: {
       type: "hasOne",
-      child: { model: "author", belongsToField: "post" },
+      child: { model: "profile", belongsToField: "user" },
       storageKey: "uo3Gt-dgM42k",
     },
   },
-  searchIndex: false,
 };
 ```
 
-**Naming:** Use singular (`author`, `product`).
+**Naming:** Use singular (`profile`, `author`).
 
 
 ## hasMany - One to Many
 
-Example: `schema.gadget.ts` on a `post` model, where `post` hasMany `comment`:
+Example: `schema.gadget.ts` on a `post` model, where `post` hasMany `comments`:
 
-```javascript
+```typescript
 import type { GadgetModel } from "gadget-server";
 
 export const schema: GadgetModel = {
   type: "gadget/model-schema/v2",
   storageKey: "M4tc9dEo5QAi",
   fields: {
-    comment: {
+    comments: {
       type: "hasMany",
       children: { model: "comment", belongsToField: "post" },
       storageKey: "fkoxdxH4F-iL",
     },
   },
-  searchIndex: false,
 };
 ```
 
@@ -83,18 +80,18 @@ export const schema: GadgetModel = {
 
 ## hasManyThrough - Many to Many
 
-Example: `schema.gadget.ts` on a `student` model, where `student` hasMany `course` through `registration`:
+Example: `schema.gadget.ts` on a `student` model, where `student` hasMany `courses` through `registration`:
 
-```javascript
+```typescript
 import type { GadgetModel } from "gadget-server";
 
 export const schema: GadgetModel = {
   type: "gadget/model-schema/v2",
   storageKey: "M4tc9dEo5QAi",
   fields: {
-    course: {
+    courses: {
       type: "hasManyThrough",
-      sibling: { model: "course", relatedField: "student" },
+      sibling: { model: "course", relatedField: "students" },
       join: {
         model: "registration",
         belongsToSelfField: "student",
@@ -103,11 +100,10 @@ export const schema: GadgetModel = {
       storageKey: "jaxjjNW_tx5X",
     },
   },
-  searchIndex: false,
 };
 ```
 
-**Naming:** Use plural (`comments`, `orders`, `products`)
+**Naming:** Use plural (`courses`, `orders`, `tags`)
 
 **Important:** Don't create extra `hasMany` fields to join model - Gadget handles it automatically.
 

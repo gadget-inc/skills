@@ -53,13 +53,17 @@ filter ($session: Session) on Product [
 
 Then configure permissions in `accessControl/permissions.gadget.ts`:
 ```typescript
-import type { GadgetAccessControl } from "gadget-server";
+import type { GadgetPermissions } from "gadget-server";
 
-export const accessControl: GadgetAccessControl = {
-  type: "gadget/access-control/v1",
+export const permissions: GadgetPermissions = {
+  type: "gadget/permissions/v1",
   roles: {
     "shopify-app-users": {
       storageKey: "shopify-app-users",
+      default: {
+        read: false,
+        action: false,
+      },
       models: {
         product: {
           read: { filter: "accessControl/filters/product/shop-tenant.gelly" },
@@ -107,11 +111,26 @@ export const run = async ({ api, connections }) => {
 Add direct `shop` relationship even when models are nested:
 
 ✅ **Correct - Denormalized:**
-```javascript
-model comment {
-  belongsTo post: Post
-  belongsTo shop: ShopifyShop  // Direct
-}
+```typescript
+// api/models/comment/schema.gadget.ts
+import type { GadgetModel } from "gadget-server";
+
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Jkl234MnoPqr",
+  fields: {
+    post: {
+      type: "belongsTo",
+      parent: { model: "post" },
+      storageKey: "Stu567VwxYza",
+    },
+    shop: {
+      type: "belongsTo",
+      parent: { model: "shopifyShop" },
+      storageKey: "Bcd890EfgHij",  // Direct relationship
+    },
+  },
+};
 ```
 
 ```gelly
@@ -122,11 +141,22 @@ filter ($session: Session) on Comment [
 ```
 
 ❌ **Avoid - Traversing:**
-```javascript
-model comment {
-  belongsTo post: Post
-  // No shop field
-}
+```typescript
+// api/models/comment/schema.gadget.ts
+import type { GadgetModel } from "gadget-server";
+
+export const schema: GadgetModel = {
+  type: "gadget/model-schema/v2",
+  storageKey: "Klm123NopQrs",
+  fields: {
+    post: {
+      type: "belongsTo",
+      parent: { model: "post" },
+      storageKey: "Tuv456WxyZab",
+    },
+    // No shop field - bad!
+  },
+};
 ```
 
 ```gelly
