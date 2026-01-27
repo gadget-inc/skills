@@ -324,3 +324,4 @@ export const permissions: GadgetPermissions = {
 - [shopify-multi-tenancy.md](shopify-multi-tenancy.md) - Shop isolation
 - [actions.md](actions.md) - How actions enforce permissions
 - [Gelly docs](https://docs.gadget.dev/reference/gelly) - Filter syntax
+  

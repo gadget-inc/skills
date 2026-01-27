@@ -1,9 +1,5 @@
 # Shopify Integration
 
-## Quick Reference
-
-For complete Shopify patterns, see the **gadget-shopify** skill. This file covers the essentials.
-
 ## Setup
 
 1. Add Shopify connection in Gadget web editor

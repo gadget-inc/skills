@@ -1,13 +1,7 @@
 ---
 name: gadget-best-practices
 description: Best practices for Gadget - Full-stack application development platform. Use when developers need guidance on models, actions, routes, access control, Shopify/BigCommerce integrations, frontend patterns, or Gadget framework decisions. Triggers "Gadget app", "model", "action", "Shopify app", "BigCommerce app", "multi-tenancy", "access control", "Gadget frontend"
-metadata:
-  tags: gadget, full-stack, shopify, bigcommerce, react, database, graphql, actions, models
 ---
-
-## When to use
-
-Use this skill whenever you're working with Gadget applications to get domain-specific knowledge about the platform, patterns, and best practices.
 
 ## How to use
 
@@ -39,7 +33,6 @@ Read individual rule files for detailed explanations and code examples:
 
 ### Development Workflow
 - [references/ggt-cli.md](references/ggt-cli.md) - CLI commands for adding models, fields, actions, and routes
-- [references/testing.md](references/testing.md) - Testing patterns for Gadget apps
 - [references/deployment.md](references/deployment.md) - Deployment workflows and environments
 - [references/environments.md](references/environments.md) - Environment variables and multi-environment strategies
 - [references/project-structure.md](references/project-structure.md) - File organization and conventions
