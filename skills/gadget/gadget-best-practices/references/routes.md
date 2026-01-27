@@ -167,7 +167,7 @@ export default async function (request, reply) {
 - ❌ Use routes for standard CRUD
 - ❌ Forget to check authentication
 - ❌ Run long operations synchronously
-- ❌ Expose internal API to frontend
+- ❌ Try to use internal API from frontend (it doesn't exist there)
 - ❌ Trust unverified webhooks
 
 ## Common Mistakes

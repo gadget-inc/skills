@@ -172,14 +172,16 @@ filter post.shopId == $tenant.id  // Slower
 
 ## Internal API
 
-Bypasses permissions and validations.
+Bypasses permissions, validations, and action lifecycle. Actions are not run when using the internal API.
 
-✅ **Use in backend code** (actions, routes):
+✅ **Use only when direct database updates are needed** (in backend code - actions, routes):
 ```javascript
 const allPosts = await api.internal.post.findMany();
 ```
 
-❌ **NEVER from frontend** - security vulnerability
+❌ **NOT available in frontend** - The internal API does not exist in the frontend and cannot be called from frontend code
+
+⚠️ **Important:** The internal API bypasses the action lifecycle (`run`, `onSuccess`, etc.). Use regular API calls (`api.post.create()`) if you need actions to execute.
 
 ## Example: Blog App
 
@@ -249,7 +251,7 @@ export const accessControl: GadgetAccessControl = {
 **DON'T:**
 - ❌ Grant explicit permissions to `system-admin`
 - ❌ Assume transitive permissions
-- ❌ Expose internal API to frontend
+- ❌ Try to use internal API from frontend (it doesn't exist there)
 - ❌ Delete/rename built-in roles or `session` model
 
 ## Common Mistakes
@@ -257,7 +259,7 @@ export const accessControl: GadgetAccessControl = {
 1. **Missing tenancy filters** - Data leaks
 2. **Assuming transitive permissions** - Each model needs its own filter
 3. **Traversing relationships** - Prefer direct
-4. **Exposing internal API** - Security vulnerability
+4. **Trying to use internal API from frontend** - It doesn't exist in the frontend
 
 ## See Also
 

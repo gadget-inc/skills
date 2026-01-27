@@ -2,7 +2,7 @@
 
 ## What Are Background Jobs?
 
-Background jobs run actions asynchronously outside the main request/response cycle. They're powered by **Temporal**, a durable workflow orchestration system.
+Background jobs run actions asynchronously outside the main request/response cycle. They're powered by Temporal, a durable workflow orchestration system.
 
 **Key features:**
 - Non-blocking execution
@@ -168,6 +168,28 @@ export const run = async ({ api }) => {
     }
   );
 };
+```
+
+## Concurrency control
+
+Background jobs can be run in dedicated queues with a max concurrency
+
+```javascript
+await api.enqueue(
+    api.someModelOrGlobalAction,
+    { foo: "foo", bar: 10 },
+  // setting a queue with custom max concurrency
+  { queue: { name: "dedicated-queue", maxConcurrency: 4 } }
+);
+```
+
+## Queue Priority
+
+Background actions can be given a priority ("low", "medium", "high") with higher priority actions being dispatched first
+
+```javascript
+// enqueue an action that should run before other default or low priority actions
+await api.enqueue(api.publish, { postId: 1 }, { priority: "high" });
 ```
 
 ## Monitoring Jobs

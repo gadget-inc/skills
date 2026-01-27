@@ -19,9 +19,6 @@ Gadget apps have multiple environments:
 ggt deploy --env=production
 ```
 
-**Via Git:**
-Push to `main` branch triggers auto-deployment (if enabled).
-
 ## Deployment Process
 
 1. Code is bundled and optimized
@@ -64,7 +61,7 @@ Set in **Settings → Environment Variables**:
 After deployment:
 - Check **Logs** tab for errors
 - Monitor **Queues** for background jobs
-- Check **Metrics** for performance
+- Check **Ops** for performance
 
 ## Best Practices
 
@@ -73,6 +70,5 @@ After deployment:
 - ✅ Smoke test after deploying
 - ✅ Monitor logs and metrics
 - ✅ Have a rollback plan
-- ❌ Don't deploy on Fridays
 - ❌ Don't deploy untested code
 - ❌ Don't skip smoke testing

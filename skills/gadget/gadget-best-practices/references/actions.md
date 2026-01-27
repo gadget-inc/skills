@@ -70,7 +70,7 @@ export const onSuccess = async ({ api, record }) => {
 - Enqueue background jobs
 
 **Sample context params:**
-- `api` - Internal API for queries
+- `api` - Regular API for queries (use `api.internal` only when direct database updates are needed - bypasses permissions, validations, and action lifecycle)
 - `record` - The record being operated on
 - `params` - Input parameters
 - `logger` - Structured logger
@@ -267,7 +267,7 @@ export const run = async ({ logger, params }) => {
 - ✅ Use `onSuccess` for side effects
 - ✅ Enqueue long operations
 - ✅ Filter by tenant in multi-tenant apps
-- ✅ Use internal API for backend-only operations
+- ✅ Use `api.internal` only when direct database updates are needed (bypasses permissions, validations, and action lifecycle - only available in backend code)
 
 **DON'T:**
 - ❌ Use actions for reads

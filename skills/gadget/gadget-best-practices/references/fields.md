@@ -54,7 +54,7 @@ Fields define the columns in your database tables (models). Each field has:
 - ✅ Named states or categories
 
 **When NOT to use:**
-- ❌ Many options (6+) - use a related model instead
+- ❌ Many options - use a related model instead
 - ❌ Options that change frequently - use a related model
 
 ### JSON Fields

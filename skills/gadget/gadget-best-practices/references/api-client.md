@@ -184,16 +184,20 @@ await api.post.bulkDelete(["id-1", "id-2"]);
 
 ## Internal API
 
-Bypasses permissions and validations:
+Bypasses permissions, validations, and action lifecycle. Actions are not run when using the internal API.
+
+**Use only when direct database updates are needed** (in backend code - actions, routes):
 
 ```javascript
-// Use only in backend code
+// Direct database update - no actions run
 const posts = await api.internal.post.create({
   title: "My Post"
 });
 ```
 
-**⚠️ NEVER use internal API from frontend!**
+**⚠️ The internal API does not exist in the frontend and cannot be called from frontend code**
+
+**⚠️ Important:** The internal API bypasses the action lifecycle (`run`, `onSuccess`, etc.). Use regular API calls (`api.post.create()`) if you need actions to execute.
 
 ## Best Practices
 
@@ -201,9 +205,10 @@ const posts = await api.internal.post.create({
 - ✅ Use filters to scope queries
 - ✅ Use `{ _link: "id" }` for relationships
 - ✅ Use pagination for large datasets
-- ✅ Use internal API only in backend
+- ✅ Use internal API only when direct database updates are needed (bypasses actions)
 - ❌ Don't select all fields unnecessarily
 - ❌ Don't fetch in loops (batch instead)
-- ❌ Don't expose internal API to frontend
+- ❌ Don't try to use internal API from frontend (it doesn't exist there)
+- ❌ Don't use internal API if you need actions to run (use regular API instead)
 
 See **gadget-development** skill for more patterns.
