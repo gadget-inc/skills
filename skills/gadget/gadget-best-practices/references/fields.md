@@ -99,8 +99,9 @@ Gadget handles storage automatically.
 **Computed**
 - Calculated values (not stored)
 - Defined with Gelly expressions
+- Included by default in public API, excluded from internal API and action `record` objects
 
-See [Gelly documentation](https://docs.gadget.dev/reference/gelly) for syntax.
+See [data-access.md](data-access.md) for syntax, aggregate patterns, and usage details.
 
 ## Field Naming
 

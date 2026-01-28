@@ -11,6 +11,7 @@ Read individual rule files for detailed explanations and code examples:
 - [references/models.md](references/models.md) - Data model design patterns and naming conventions
 - [references/fields.md](references/fields.md) - Field types, validations, and configuration
 - [references/relationships.md](references/relationships.md) - Relationship patterns (belongsTo, hasMany, hasManyThrough)
+- [references/data-access.md](references/data-access.md) - Computed views and computed fields (Gelly aggregates, group by, time-series, access control)
 
 ### Backend Logic
 - [references/actions.md](references/actions.md) - Model actions vs global actions, hooks, and patterns

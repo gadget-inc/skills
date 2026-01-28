@@ -1,6 +1,6 @@
 # Gadget Skills for Claude Code
 
-A [Claude Code skill](https://claude.ai/claude-code) that provides best practices and patterns for building applications on the [Gadget platform](https://gadget.dev).
+A [Claude Code skill](https://claude.ai/claude-code) that provides best practices and patterns for building applications on [Gadget](https://gadget.dev).
 
 ## Installation
 
@@ -14,15 +14,17 @@ The skill automatically activates when working on Gadget projects or when you me
 
 You can also manually load it:
 ```bash
-/skill gadget-best-practices
+/gadget-best-practices
 ```
 
 **Example queries:**
 - "Add a bundle model with required name and discountPercentage fields that has many products"
+- "Build a top 10 leaderboard where each completed challenge counts for one point. Use a computed view to aggregate leaderboard data"
 - "Create a publish action for the post model that sets publishedAt and status to published"
 - "Build a form to edit user profiles with name, email, and avatar upload"
 - "Add a POST route for /webhook/stripe that verifies signatures and enqueues processing"
-- "How do I implement row-level permissions in a multi-tenant Shopify app?"
+
+More detail is a good thing, and using Gadget terminology when you know what you want is helpful!
 
 ## What's included?
 

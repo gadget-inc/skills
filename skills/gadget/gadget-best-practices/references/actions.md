@@ -21,7 +21,6 @@ Actions are server-side functions that run business logic and write data. They a
 - Scheduled tasks
 
 ❌ **Don't use actions for:**
-- Read-only operations (use GraphQL queries)
 - Simple transformations (use computed fields)
 - Streaming/custom HTTP (use routes)
 
@@ -270,14 +269,13 @@ export const run = async ({ logger, params }) => {
 - ✅ Use `api.internal` only when direct database updates are needed (bypasses permissions, validations, and action lifecycle - only available in backend code)
 
 **DON'T:**
-- ❌ Use actions for reads
 - ❌ Call external APIs in `run` (use `onSuccess`)
 - ❌ Forget to filter by tenant
 - ❌ Run long operations synchronously
 
 ## Common Mistakes
 
-1. **Using actions for reads** - Use GraphQL queries
+1. **Using actions for reads unless absolutely necessary** - Use GraphQL queries or computed views, if possible
 2. **Not enqueueing long operations** - Causes timeouts
 3. **Not filtering by tenant** - Security vulnerability
 4. **Forgetting `await record.save()`** - Changes won't persist
