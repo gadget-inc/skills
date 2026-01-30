@@ -1,5 +1,7 @@
 # Access Control
 
+**📖 Full docs:** [docs.gadget.dev/guides/access-control](https://docs.gadget.dev/guides/access-control.md)
+
 Gadget has a built-in RBAC system. All operations automatically enforce permissions.
 
 ## Key Principles
@@ -323,5 +325,9 @@ export const permissions: GadgetPermissions = {
 
 - [shopify-multi-tenancy.md](shopify-multi-tenancy.md) - Shop isolation
 - [actions.md](actions.md) - How actions enforce permissions
-- [Gelly docs](https://docs.gadget.dev/reference/gelly) - Filter syntax
+
+**📖 More info:**
+- [Access control overview](https://docs.gadget.dev/guides/access-control.md)
+- [Gelly filter syntax](https://docs.gadget.dev/reference/gelly.md)
+- [Gelly data access](https://docs.gadget.dev/guides/data-access/gelly.md)
   

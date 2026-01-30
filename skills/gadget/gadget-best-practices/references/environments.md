@@ -1,5 +1,9 @@
 # Environment Variables
 
+**📖 Full docs:**
+- [Environment variables](https://docs.gadget.dev/guides/development-tools/environment-variables.md)
+- [Environments](https://docs.gadget.dev/guides/environments.md)
+
 ## Setting Environment Variables
 
 **In Gadget IDE:**

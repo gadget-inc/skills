@@ -1,5 +1,7 @@
 # API Client
 
+**📖 Full docs:** [docs.gadget.dev/guides/data-access/api](https://docs.gadget.dev/guides/data-access/api.md)
+
 ## Overview
 
 Gadget auto-generates a type-safe API client for all models and actions.
@@ -117,6 +119,117 @@ const records = await api.post.findMany({
 
 Searching requires fields to be indexed for search.
 
+## Pagination
+
+Gadget uses cursor-based pagination for efficient data fetching.
+
+⚠️ **Important:** Pagination can be time consuming. Make sure it is necessary. It is useful when paginating through records on the frontend. For aggregations, use [computed views](data-access.md) if possible.
+
+### Basic Pagination
+
+```javascript
+const taskRecords = await api.task.findMany();
+if (taskRecords.hasNextPage) {
+  const nextPage = await taskRecords.nextPage();
+}
+if (taskRecords.hasPreviousPage) {
+  const prevPage = await taskRecords.previousPage();
+}
+```
+
+### Cursor Pagination
+
+```javascript
+// First page (first 10 records)
+const firstPage = await api.post.findMany({
+  first: 10,
+});
+
+// Next page (using cursor from last record)
+const nextPage = await api.post.findMany({
+  first: 10,
+  after: firstPage.endCursor
+});
+
+// Previous page
+const prevPage = await api.post.findMany({
+  last: 10,
+  before: nextPage.startCursor
+});
+```
+
+### Page Info
+
+Every `findMany` result includes pagination metadata:
+
+```javascript
+const result = await api.post.findMany({ first: 10 });
+
+console.log(result.pageInfo);
+// {
+//   hasNextPage: true,
+//   hasPreviousPage: false,
+//   startCursor: "cursor-1",
+//   endCursor: "cursor-10"
+// }
+```
+
+### Max Page Size
+
+The max page size for `findMany` requests is 250:
+
+```javascript
+const result = await api.post.findMany({ first: 250 });
+```
+
+### Complete Pagination Example
+
+```javascript
+async function getAllPosts() {
+  let allPosts = [];
+  let cursor = null;
+  let hasMore = true;
+
+  while (hasMore) {
+    const result = await api.post.findMany({
+      first: 100,
+      after: cursor,
+      sort: { createdAt: "Descending" }
+    });
+
+    allPosts = allPosts.concat(result);
+    cursor = result.endCursor;
+    hasMore = result.pageInfo.hasNextPage;
+  }
+
+  return allPosts;
+}
+```
+
+### React Pagination with useFindMany
+
+```tsx
+function PaginatedPosts() {
+  const [cursor, setCursor] = useState(null);
+
+  const [{ data, fetching }] = useFindMany(api.post, {
+    first: 20,
+    after: cursor
+  });
+
+  return (
+    <>
+      {data?.map(post => <Post key={post.id} {...post} />)}
+      {data?.pageInfo.hasNextPage && (
+        <button onClick={() => setCursor(data.endCursor)}>
+          Load More
+        </button>
+      )}
+    </>
+  );
+}
+```
+
 ## Creating Records
 
 ```javascript
@@ -204,11 +317,15 @@ const posts = await api.internal.post.create({
 - ✅ Select only needed fields
 - ✅ Use filters to scope queries
 - ✅ Use `{ _link: "id" }` for relationships
-- ✅ Use pagination for large datasets
+- ✅ Use basic or cursor-based pagination to iterate over many pages of records
+- ✅ Check `pageInfo.hasNextPage` before fetching more
 - ✅ Use internal API only when direct database updates are needed (bypasses actions)
 - ❌ Don't select all fields unnecessarily
 - ❌ Don't fetch in loops (batch instead)
 - ❌ Don't try to use internal API from frontend (it doesn't exist there)
 - ❌ Don't use internal API if you need actions to run (use regular API instead)
 
-See **gadget-development** skill for more patterns.
+**📖 More info:**
+- [API access patterns](https://docs.gadget.dev/guides/data-access/api.md)
+- [Filtering and sorting](https://docs.gadget.dev/guides/data-access/api.md#filtering-records)
+- [Frontend React hooks](https://docs.gadget.dev/reference/react.md)

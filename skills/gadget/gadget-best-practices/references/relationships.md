@@ -1,5 +1,7 @@
 # Relationships
 
+**📖 Full docs:** [docs.gadget.dev/guides/models/relationships](https://docs.gadget.dev/guides/models/relationships.md)
+
 Relationships connect models together, like foreign keys in SQL.
 
 ## Four Types

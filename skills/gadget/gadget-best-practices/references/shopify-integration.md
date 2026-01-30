@@ -1,5 +1,7 @@
 # Shopify Integration
 
+**📖 Full docs:** [docs.gadget.dev/guides/plugins/shopify](https://docs.gadget.dev/guides/plugins/shopify.md)
+
 ## Setup
 
 1. Add Shopify connection in Gadget web editor
@@ -147,7 +149,14 @@ See [shopify-multi-tenancy.md](shopify-multi-tenancy.md) for complete patterns.
 
 ## See Also
 
-- **gadget-shopify** skill - Complete Shopify patterns
 - [shopify-multi-tenancy.md](shopify-multi-tenancy.md) - Tenant isolation
 - [webhooks.md](webhooks.md) - General webhook patterns
 - [background-jobs.md](background-jobs.md) - Enqueueing patterns
+
+**📖 More info:**
+- [Shopify plugin overview](https://docs.gadget.dev/guides/plugins/shopify.md)
+- [Building Shopify apps](https://docs.gadget.dev/guides/plugins/shopify/building-shopify-apps.md)
+- [Shopify webhooks](https://docs.gadget.dev/guides/plugins/shopify/shopify-webhooks.md)
+- [Syncing Shopify data](https://docs.gadget.dev/guides/plugins/shopify/syncing-shopify-data.md)
+- [Shopify metafields](https://docs.gadget.dev/guides/plugins/shopify/advanced-topics/metafields-metaobjects.md)
+- [Shopify OAuth](https://docs.gadget.dev/guides/plugins/shopify/advanced-topics/oauth.md)

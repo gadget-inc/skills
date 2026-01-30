@@ -1,5 +1,10 @@
 # Data Access: Computed Views and Aggregates
 
+**📖 Full docs:**
+- [Computed fields](https://docs.gadget.dev/guides/data-access/computed-fields.md)
+- [Computed views](https://docs.gadget.dev/guides/data-access/computed-views.md)
+- [Gelly](https://docs.gadget.dev/guides/data-access/gelly.md)
+
 Gadget provides two mechanisms for read-only computations beyond standard CRUD: **computed fields** (per-record) and **computed views** (cross-record queries). Both are written in **Gelly**, Gadget's expression language.
 
 ## When to use what

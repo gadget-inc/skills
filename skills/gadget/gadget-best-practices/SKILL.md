@@ -1,9 +1,14 @@
 ---
 name: gadget-best-practices
-description: Best practices for Gadget - Full-stack application development platform. Use when developers need guidance on models, actions, routes, access control, Shopify/BigCommerce integrations, frontend patterns, or Gadget framework decisions. Triggers "Gadget app", "model", "action", "Shopify app", "BigCommerce app", "multi-tenancy", "access control", "Gadget frontend"
+description: Best practices for building with Gadget. Use when developers need guidance on models, actions, routes, access control, Shopify/BigCommerce integrations, frontend patterns, API usage, permissions, or framework decisions. Triggers "model", "action", "route", "permission", "access control", "multi-tenancy", "Shopify", "BigCommerce", "frontend", "API client", "filter", "pagination", "webhook", "background job"
 ---
 
 ## How to use
+
+This skill provides quick reference patterns and best practices for building with Gadget.
+
+**📖 Resources:**
+- Full documentation: [docs.gadget.dev](https://docs.gadget.dev)
 
 Read individual rule files for detailed explanations and code examples:
 

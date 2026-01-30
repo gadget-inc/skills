@@ -1,5 +1,9 @@
 # Shopify Multi-Tenancy
 
+**📖 Full docs:**
+- [Shopify data security](https://docs.gadget.dev/guides/plugins/shopify/advanced-topics/data-security.md)
+- [Access control](https://docs.gadget.dev/guides/access-control.md)
+
 ## The Golden Rule
 
 **All models storing merchant data MUST have `belongsTo shop: ShopifyShop`.**

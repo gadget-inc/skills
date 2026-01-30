@@ -1,5 +1,9 @@
 # Frontend Hooks
 
+**📖 Full docs:**
+- [Building frontends](https://docs.gadget.dev/guides/frontend/building-frontends.md)
+- [@gadgetinc/react reference](https://docs.gadget.dev/reference/react.md)
+
 ## Overview
 
 `@gadgetinc/react` provides React hooks for querying and mutating Gadget data.
@@ -132,3 +136,8 @@ function PaginatedPosts() {
 - ✅ Use `useActionForm` for forms
 - ❌ Don't fetch in loops
 - ❌ Don't over-select fields
+
+**📖 More info:**
+- [Frontend forms](https://docs.gadget.dev/guides/frontend/forms.md)
+- [Real-time queries](https://docs.gadget.dev/guides/frontend/realtime-queries.md)
+- [@gadgetinc/react hooks reference](https://docs.gadget.dev/reference/react.md)
