@@ -1,8 +1,6 @@
 # BigCommerce Integration
 
-## Quick Reference
-
-For complete BigCommerce patterns, see the **gadget-bigcommerce** skill. This file covers the essentials.
+**📖 Full docs:** [docs.gadget.dev/guides/plugins/bigcommerce](https://docs.gadget.dev/guides/plugins/bigcommerce.md)
 
 ## Setup
 
@@ -177,7 +175,12 @@ function App() {
 
 ## See Also
 
-- **gadget-bigcommerce** skill - Complete BigCommerce patterns
 - [webhooks.md](webhooks.md) - General webhook patterns
 - [background-jobs.md](background-jobs.md) - Enqueueing and rate limiting
 - [access-control.md](access-control.md) - Multi-tenancy permissions
+
+**📖 More info:**
+- [BigCommerce plugin overview](https://docs.gadget.dev/guides/plugins/bigcommerce.md)
+- [BigCommerce webhooks](https://docs.gadget.dev/guides/plugins/bigcommerce/webhooks.md)
+- [BigCommerce data](https://docs.gadget.dev/guides/plugins/bigcommerce/data.md)
+- [BigCommerce frontends](https://docs.gadget.dev/guides/plugins/bigcommerce/frontends.md)

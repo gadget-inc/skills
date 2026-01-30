@@ -1,5 +1,7 @@
 # Fields
 
+**📖 Full docs:** [docs.gadget.dev/guides/models/fields](https://docs.gadget.dev/guides/models/fields.md)
+
 ## What Are Fields?
 
 Fields define the columns in your database tables (models). Each field has:
@@ -362,3 +364,8 @@ ggt add field post/status:enum --options=draft,published,archived
 - ❌ Add "Id" suffix to belongsTo fields
 - ❌ Default to empty strings or zero dates
 - ❌ Over-validate (only add necessary validations)
+
+**📖 More info:**
+- [Field types](https://docs.gadget.dev/guides/models/fields.md)
+- [Storing files](https://docs.gadget.dev/guides/models/storing-files.md)
+- [Computed fields](https://docs.gadget.dev/guides/data-access/computed-fields.md)

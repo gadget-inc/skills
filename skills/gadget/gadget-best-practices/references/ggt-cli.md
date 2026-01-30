@@ -1,5 +1,9 @@
 # ggt CLI Commands
 
+**📖 Full docs:**
+- [ggt reference](https://docs.gadget.dev/reference/ggt.md)
+- [CLI](https://docs.gadget.dev/guides/development-tools/cli.md)
+
 The `ggt` CLI is Gadget's command-line interface for local development and code generation.
 
 ## Installation
@@ -104,4 +108,4 @@ ggt status # Check sync status
 
 ## Reference
 
-Full documentation: [https://docs.gadget.dev/reference/ggt](https://docs.gadget.dev/reference/ggt)
+Full documentation: [https://docs.gadget.dev/reference/ggt](https://docs.gadget.dev/reference/ggt.md)

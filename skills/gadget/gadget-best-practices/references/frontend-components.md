@@ -1,5 +1,10 @@
 # Frontend Components
 
+**📖 Full docs:**
+- [Autocomponents](https://docs.gadget.dev/guides/frontend/autocomponents.md)
+- [Polaris autocomponents](https://docs.gadget.dev/guides/frontend/autocomponents/polaris.md)
+- [Shadcn autocomponents](https://docs.gadget.dev/guides/frontend/autocomponents/shadcn.md)
+
 ## Autocomponents
 
 Gadget provides autocomponents for rapid UI development.

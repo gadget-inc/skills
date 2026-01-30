@@ -1,5 +1,7 @@
 # Data Models
 
+**📖 Full docs:** [docs.gadget.dev/guides/models](https://docs.gadget.dev/guides/models.md)
+
 ## What Are Models?
 
 In Gadget, a **model** represents a database table. Each table row is a **record**.
@@ -422,3 +424,9 @@ The `user` model typically includes:
 - ❌ Use JSON when you know the schema
 - ❌ Create models for transient or computed data
 - ❌ Modify core `user` model authentication fields
+
+**📖 More info:**
+- [Model fields](https://docs.gadget.dev/guides/models/fields.md)
+- [Relationships](https://docs.gadget.dev/guides/models/relationships.md)
+- [Storing files](https://docs.gadget.dev/guides/models/storing-files.md)
+- [Model namespaces](https://docs.gadget.dev/guides/models/namespaces.md)

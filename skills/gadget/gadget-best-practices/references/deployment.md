@@ -1,5 +1,9 @@
 # Deployment
 
+**📖 Full docs:**
+- [Deployment](https://docs.gadget.dev/guides/environments/deployment.md)
+- [CI/CD](https://docs.gadget.dev/guides/environments/ci-cd.md)
+
 ## Environments
 
 Gadget apps have multiple environments:

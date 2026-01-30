@@ -1,5 +1,7 @@
 # Authentication
 
+**📖 Full docs:** [docs.gadget.dev/guides/plugins/authentication](https://docs.gadget.dev/guides/plugins/authentication.md)
+
 ## Built-In Auth
 
 Gadget provides built-in authentication with:
@@ -144,3 +146,9 @@ Similar to Shopify:
 - ❌ Don't store passwords in plain text
 
 See [access-control.md](access-control.md) for permissions.
+
+**📖 More info:**
+- [Authentication overview](https://docs.gadget.dev/guides/plugins/authentication.md)
+- [Email/password auth](https://docs.gadget.dev/guides/plugins/authentication/email-pass.md)
+- [Google OAuth](https://docs.gadget.dev/guides/plugins/authentication/google-oauth.md)
+- [Auth workflows](https://docs.gadget.dev/guides/plugins/authentication/workflows.md)

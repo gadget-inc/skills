@@ -1,5 +1,7 @@
 # Background Jobs
 
+**📖 Full docs:** [docs.gadget.dev/guides/actions/background](https://docs.gadget.dev/guides/actions/background.md)
+
 ## What Are Background Jobs?
 
 Background jobs run actions asynchronously outside the main request/response cycle. They're powered by Temporal, a durable workflow orchestration system.
@@ -235,3 +237,7 @@ See also:
 - [actions.md](actions.md) - Creating actions to enqueue
 - [shopify-integration.md](shopify-integration.md) - Shopify-specific patterns
 - [webhooks.md](webhooks.md) - Processing webhooks asynchronously
+
+**📖 More info:**
+- [Background actions](https://docs.gadget.dev/guides/actions/background.md)
+- [Action triggers](https://docs.gadget.dev/guides/actions/triggers.md)

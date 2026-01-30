@@ -1,5 +1,9 @@
 # Webhooks
 
+**📖 Full docs:**
+- [Shopify webhooks](https://docs.gadget.dev/guides/plugins/shopify/shopify-webhooks.md)
+- [BigCommerce webhooks](https://docs.gadget.dev/guides/plugins/bigcommerce/webhooks.md)
+
 ## Overview
 
 Webhooks let external services notify your Gadget app when events occur. Gadget provides specialized support for Shopify and BigCommerce webhooks, plus general webhook patterns.

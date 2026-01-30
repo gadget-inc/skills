@@ -1,5 +1,7 @@
 # Actions
 
+**📖 Full docs:** [docs.gadget.dev/guides/actions](https://docs.gadget.dev/guides/actions.md)
+
 Actions are server-side functions that run business logic and write data. They auto-generate GraphQL mutations, enforce permissions, and are transactional by default.
 
 ## Two Types
@@ -286,3 +288,9 @@ export const run = async ({ logger, params }) => {
 - [background-jobs.md](background-jobs.md) - Enqueueing patterns
 - [access-control.md](access-control.md) - Permissions
 - [shopify-integration.md](shopify-integration.md) - Shopify patterns
+
+**📖 More info:**
+- [Action types](https://docs.gadget.dev/guides/actions/types-of-actions.md)
+- [Writing actions](https://docs.gadget.dev/guides/actions/writing-actions.md)
+- [Background actions](https://docs.gadget.dev/guides/actions/background.md)
+- [Action triggers](https://docs.gadget.dev/guides/actions/triggers.md)

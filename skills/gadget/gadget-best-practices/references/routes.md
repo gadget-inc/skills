@@ -1,5 +1,7 @@
 # HTTP Routes
 
+**📖 Full docs:** [docs.gadget.dev/guides/http-routes](https://docs.gadget.dev/guides/http-routes.md)
+
 Routes are custom HTTP handlers built on Fastify. They provide full control over HTTP requests/responses when actions don't fit.
 
 ## When to Use
@@ -184,3 +186,8 @@ export default async function (request, reply) {
 - [background-jobs.md](background-jobs.md) - Enqueueing patterns
 - [shopify-integration.md](shopify-integration.md) - GDPR webhooks
 - [webhooks.md](webhooks.md) - Webhook handling
+
+**📖 More info:**
+- [HTTP routes overview](https://docs.gadget.dev/guides/http-routes.md)
+- [Route structure](https://docs.gadget.dev/guides/http-routes/route-structure.md)
+- [Common use cases](https://docs.gadget.dev/guides/http-routes/common-use-cases.md)
