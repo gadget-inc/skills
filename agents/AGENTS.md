@@ -209,7 +209,7 @@ export default function Widgets({ loaderData }: Route.ComponentProps) {
 **File upload**: Field type = `file` | Access via `record.fileField.url`
 **Relationships**: `belongsTo` (one) | `hasMany` (many) | `hasOne` (one)
 **Auth**: Session stored in `request.session` | User in `request.user`
-**Background jobs**: Action with `triggers: { api: false }` + `.enqueue()` method
+**Background jobs**: Action with `triggers: { api: true }` + `.enqueue()` method
 **Shopify sync**: Auto-synced via webhooks | Manual via `shopifySync` connection
 **Environment variables**: `process.env.GADGET_ENV` = "development" | "production"
 **Multi-tenancy**: Filter by `shopId` or `userId` in access control
@@ -229,7 +229,7 @@ export default function Widgets({ loaderData }: Route.ComponentProps) {
 
 - **Auto-validation**: Fields validate before `save()` (can customize in action)
 - **Auto-timestamps**: `createdAt`/`updatedAt` managed by Gadget
-- **Transactions**: Actions run in transactions by default
+- **Transactions**: Model actions `run` functions transactional by default
 - **Error handling**: Throw errors to return to client | Use `logger.error()` for logging
 - **Session management**: Auto-managed | Access via `session` context param
 - **Shopify webhooks**: Auto-registered | Auto-trigger actions on shop events
