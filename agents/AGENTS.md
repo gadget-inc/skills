@@ -1,7 +1,8 @@
 # Gadget Platform Documentation Index
 
-**Version**: (varies by framework version)
 **Base URL**: https://docs.gadget.dev
+
+_This document uses TypeScript examples (`.ts`/`.tsx`). If your app uses JavaScript, change file extensions to `.js`/`.jsx` and remove TypeScript-only type annotations._
 
 > **📖 Documentation URLs**: All doc paths support `.md` extension for raw markdown retrieval.
 > Example: `https://docs.gadget.dev/guides/actions/writing-actions.md`
