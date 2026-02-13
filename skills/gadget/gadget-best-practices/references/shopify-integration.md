@@ -55,6 +55,44 @@ export const onSuccess: ActionOnSuccess = async ({ record, api }) => {
 
 **One-directional:** Changes in Shopify → Gadget
 
+### Non-Webhook Fields and Models (Framework 1.6.0+)
+
+Some Shopify fields are not present in webhook payloads. For these fields, configure fetch behavior per field:
+
+- `fetchData: "onWebhook"`: Fetch from Shopify GraphQL when webhook events arrive.
+- `fetchData: "later"`: Defer to sync/reconciliation (default for new apps).
+
+Use `fetchData: "onWebhook"` only where near-real-time data is necessary; it can increase Shopify API usage and webhook processing time, especially for `hasMany` fields that require pagination.
+
+```typescript
+// api/models/shopifyProduct/schema.gadget.ts
+export const schema: GadgetModel = {
+  fields: {
+    seo: {
+      fetchData: "onWebhook",
+    },
+  },
+};
+```
+
+For action logic that depends on deferred fields, gate behavior by trigger type and field changes:
+
+```typescript
+export const onSuccess: ActionOnSuccess = async ({ trigger, record, logger }) => {
+  const fromDeferredSync =
+    trigger.type === "shopify_sync" || trigger.type === "shopify_webhook_reconciliation";
+
+  if (fromDeferredSync && record.changed("someField")) {
+    logger.info("someField updated by sync/reconciliation");
+  }
+};
+```
+
+Notes:
+- Non-webhook fields are also populated during full sync and nightly reconciliation.
+- Conditionally webhook-synced child models can update when parent `hasMany` fields are set to fetch on webhook.
+- Fully non-webhook models update only during sync (including `scheduledShopifySync`).
+
 ### Shopify API Access
 
 ```javascript
@@ -158,5 +196,6 @@ See [shopify-multi-tenancy.md](shopify-multi-tenancy.md) for complete patterns.
 - [Building Shopify apps](https://docs.gadget.dev/guides/plugins/shopify/building-shopify-apps.md)
 - [Shopify webhooks](https://docs.gadget.dev/guides/plugins/shopify/shopify-webhooks.md)
 - [Syncing Shopify data](https://docs.gadget.dev/guides/plugins/shopify/syncing-shopify-data.md)
+- [Non-webhook fields and models](https://docs.gadget.dev/guides/plugins/shopify/non-webhook-fields-and-models.md)
 - [Shopify metafields](https://docs.gadget.dev/guides/plugins/shopify/advanced-topics/metafields-metaobjects.md)
 - [Shopify OAuth](https://docs.gadget.dev/guides/plugins/shopify/advanced-topics/oauth.md)

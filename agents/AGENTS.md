@@ -57,7 +57,7 @@ Gadget is a full-stack platform for building backends with integrated frontends.
 #### Plugins & Connections (/guides/plugins/*.md)
 
 **Shopify** (/plugins/shopify/*.md)
-- quickstart.md | overview.md | webhooks.md | syncing-shopify-data.md | app-frontends.md | embed-previews.md | polaris.md | api-version-changelog.md
+- quickstart.md | overview.md | webhooks.md | syncing-shopify-data.md | non-webhook-fields-and-models.md | app-frontends.md | embed-previews.md | polaris.md | api-version-changelog.md
 - advanced-topics/data-security.md | advanced-topics/metafields.md | advanced-topics/oauth.md | advanced-topics/billing.md | advanced-topics/shopify-app-toml.md | advanced-topics/extensions.md | advanced-topics/customer-account-ui-extensions.md
 
 **BigCommerce** (/plugins/bigcommerce/*.md)
@@ -211,6 +211,7 @@ export default function Widgets({ loaderData }: Route.ComponentProps) {
 **Auth**: Session stored in `request.session` | User in `request.user`
 **Background jobs**: Action with `triggers: { api: true }` + `.enqueue()` method
 **Shopify sync**: Auto-synced via webhooks | Manual via `shopifySync` connection
+**Shopify non-webhook fields (1.6.0+)**: Configure per field with `fetchData: "onWebhook"` or `"later"` in `schema.gadget.ts`
 **Environment variables**: `process.env.GADGET_ENV` = "development" | "production"
 **Multi-tenancy**: Filter by `shopId` or `userId` in access control
 
