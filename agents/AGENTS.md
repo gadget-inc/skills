@@ -32,70 +32,80 @@ Gadget is a full-stack platform for building backends with integrated frontends.
 
 ### GUIDES (/guides/*.md)
 
-#### Getting Started
-- what-is-gadget.md | how-to-build-a-gadget-app.md | how-is-gadget-different-from-x.md | quickstarts/web-quickstart.md
+#### Getting Started (/guides/getting-started/*.md)
+- what-is-gadget | how-to-build-a-gadget-app | how-is-gadget-different-from-x | quickstarts/web-quickstart | quickstarts/bigcommerce-quickstart
 
 #### Models (/guides/models/*.md)
-- overview.md | fields.md | storing-files.md | relationships.md | namespaces.md
+- overview | fields | storing-files | relationships | namespaces
 
 #### Actions (/guides/actions/*.md)
-- overview.md | types-of-actions.md | whats-in-an-action.md | writing-actions.md | background-actions.md | triggers.md | namespacing-global-actions.md | actions-and-api.md
+- overview | types-of-actions | code | writing-actions | background-actions | background-actions/handling-timeouts | triggers | namespacing-global-actions | actions-and-api
 
 #### HTTP Routes (/guides/http-routes/*.md)
-- overview.md | route-structure.md | route-configuration.md | common-use-cases.md
+- (overview) | route-structure | route-configuration | common-use-cases
 
-#### Data Access (/guides/data/*.md)
-- api-access-to-data.md | computed-fields.md | computed-views.md | gelly.md | overview.md
+#### Data Access (/guides/data-access/*.md)
+- api | computed-fields | computed-views | gelly | (overview at /guides/data-access)
+- Access control: /guides/access-control
 
 #### Frontends (/guides/frontend/*.md)
-- overview.md | building-with-remix.md | building-with-react-router.md | building-with-tailwind-css.md | forms.md | realtime-queries.md | shared-code.md | external-frontends.md | optimize-lcp.md
-- autocomponents/polaris.md | autocomponents/shadcn.md
+- (overview) | building-frontends | remix-in-gadget | react-router-in-gadget | building-with-tailwind | forms | realtime-queries | shared-code | external-frontends | optimize-lcp
+- autocomponents | autocomponents/polaris | autocomponents/shadcn | autocomponents/polaris-web-components
 
-#### Authentication (/guides/access-control/*.md)
-- overview.md | auth-flows.md | building-with-google-oauth.md | building-with-email-password.md | helpers.md | removing-default-auth-methods.md
+#### Authentication (/guides/plugins/authentication/*.md)
+- (overview) | workflows | google-oauth | email-pass | helpers | remove-default-auth-methods
 
 #### Plugins & Connections (/guides/plugins/*.md)
 
-**Shopify** (/plugins/shopify/*.md)
-- quickstart.md | overview.md | webhooks.md | syncing-shopify-data.md | non-webhook-fields-and-models.md | app-frontends.md | embed-previews.md | polaris.md | api-version-changelog.md
-- advanced-topics/data-security.md | advanced-topics/metafields.md | advanced-topics/oauth.md | advanced-topics/billing.md | advanced-topics/shopify-app-toml.md | advanced-topics/extensions.md | advanced-topics/customer-account-ui-extensions.md
+**Shopify** (/guides/plugins/shopify/*.md)
+- quickstart | (overview) | building-shopify-apps | shopify-webhooks | syncing-shopify-data | non-webhook-fields-and-models | frontends | embed-previews | api-version-changelog
+- advanced-topics/data-security | advanced-topics/metafields-metaobjects | advanced-topics/oauth | advanced-topics/billing | advanced-topics/shopify-app-toml | advanced-topics/extensions | advanced-topics/customer-account-ui-extensions
 
-**BigCommerce** (/plugins/bigcommerce/*.md)
-- overview.md | webhooks.md | working-with-bigcommerce-data.md | building-single-click-app-frontends.md | app-extensions.md | catalyst-storefronts.md | api-extensions.md
+**BigCommerce** (/guides/plugins/bigcommerce/*.md)
+- (overview) | webhooks | data | frontends | app-extensions | catalyst
 
-**OpenAI** (/plugins/openai/*.md)
-- overview.md | building-with-openai.md | building-chatgpt-apps.md
+**OpenAI** (/guides/plugins/openai/*.md)
+- (overview) | building-ai-apps
+
+**ChatGPT** (/guides/plugins/chatgpt.md)
+- (overview)
 
 **Other**
-- plugins-overview.md | extending-gadget.md | sentry.md
+- (plugins overview at /guides/plugins) | extending-gadget | sentry
 
 #### Development Tools (/guides/development-tools/*.md)
-- logger.md | ggt.md | environment-variables.md | terminal.md | typescript-support.md | unit-testing.md | framework-linter.md | rate-limits.md | runtime-environment.md | operations-dashboard.md | debugging-and-profiling.md | keyboard-shortcuts.md
-- ai-assistant/features.md | ai-assistant/prompt-guide.md
+- logger | cli | environment-variables | terminal | typescript-support | unit-testing | framework-linter | rate-limits | runtime-environment | operations-dashboard | debugging-and-profiling | keyboard-shortcuts
+- ai-assistant/features | ai-assistant/prompt-guide
 
 #### Environments & Deployment (/guides/environments/*.md)
-- overview.md | deployment.md | set-up-ci-cd-pipeline.md | custom-domains.md | development-pausing.md
+- (overview) | deployment | ci-cd | custom-domains | development-pausing
 
 #### Other Guides
-- source-control.md | templates.md | account-and-billing.md | faq.md | glossary.md | what-gadget-gives-you.md
+- source-control | templates | account-and-billing | account-and-billing/optimizing-your-bill | faq | glossary | gadget-framework
 
 #### Tutorials (/guides/tutorials/*.md)
-- ai-screenwriter.md | automated-product-tagger.md | bigcommerce-product-search-keywords.md | bigcommerce-size-charts.md | chatgpt-todo-list.md | middleware.md | shopify-ui-extension.md | shopify-theme-app-extensions.md
+- ai-screenwriter | automated-product-tagger | middleware
+- bigcommerce/product-search-keywords | bigcommerce/size-charts
+- chatgpt/todo-list
+- shopify/ui-extension | shopify/theme-app-extensions
 
-#### Framework Migrations (/guides/framework-version-migrations/*.md)
-- v1.md | v1.3.md | v1.4.md
+#### Framework Migrations (/guides/gadget-framework/*.md)
+- v1-migration | v1-3-migration | v1-4-migration
 
 ### API REFERENCE (/api/[app-slug]/[environment]/*.md)
 
 **Context**: Auto-generated per-app API documentation. These pages reference YOUR specific models, actions, and configuration.
 
-- introduction.md | model.md | actions.md | global-actions.md | global-views.md | session-model.md | gadget-record.md | sorting-and-filtering.md | schema.md | graphql.md | authentication.md | installing.md | using-with-react.md | type-safety.md | errors.md | external-api-calls.md | api-calls-within-gadget.md | internal-api.md | api-client-changelog.md
+- (root) | gadget-record | background-action-handle | sorting-and-filtering | errors | internal-api | api-calls-within-gadget | using-with-react
+- schema/[model] | schema/global-actions | schema/global-views
+- external-api-calls | external-api-calls/installing | external-api-calls/authentication | external-api-calls/graphql
 
 ### PACKAGE REFERENCE (/reference/*.md)
 
 **ggt CLI** (/reference/ggt.md)
-- Commands: dev | pull | push | deploy | sync | add | status | open | log | whoami
+- Commands: dev | pull | push | deploy | sync | add | var | status | open | log | whoami
 - Use `ggt add` to create models, actions, routes (avoid hand-creating model folders/files)
+- Use `ggt var` to manage environment variables (list/get/set/delete/import)
 
 **Gelly Query Language** (/reference/gelly.md)
 - Filter operators: equals | notEquals | in | notIn | greaterThan | lessThan | startsWith | endsWith
@@ -113,12 +123,12 @@ Gadget is a full-stack platform for building backends with integrated frontends.
 **@gadgetinc/preact** (/reference/preact.md)
 - Preact-specific client library (similar API to React)
 
-**@gadgetinc/react/auto** (/reference/react-auto.md)
+**@gadgetinc/react/auto** (/reference/react/auto.md)
 - Components: AutoForm | AutoTable | AutoButton | AutoInput | AutoTextInput | AutoNumberInput | AutoBooleanInput | AutoFileInput | AutoRelationshipInput
 - Polaris variants: PolarisAutoForm | PolarisAutoTable
 - Shadcn variants: ShadcnAutoForm | ShadcnAutoTable
 
-**@gadgetinc/react-shopify-app-bridge** (/reference/react-shopify-app-bridge.md)
+**@gadgetinc/react-shopify-app-bridge** (/reference/shopify-app-bridge.md)
 - Components: AppBridgeProvider | useAppBridge
 - Auth: useGadgetAuth | useBillingCheck
 
@@ -132,6 +142,9 @@ Gadget is a full-stack platform for building backends with integrated frontends.
 
 **@gadgetinc/react-chatgpt-apps** (/reference/react-chatgpt-apps.md)
 - Hooks: useChatGPTAuth | useAction
+
+**Metadata files** (/reference/metadata-files.md)
+- Gadget schema file definitions (schema.gadget.ts, etc.)
 
 ## Code Patterns
 
@@ -242,7 +255,7 @@ export default function Widgets({ loaderData }: Route.ComponentProps) {
 - `https://docs.gadget.dev/reference/gadget-server.md`
 
 **For implementation questions**: Fetch from `/guides/*.md` for conceptual overviews and patterns
-**For API usage**: Fetch from `/api-reference/*.md` or `/reference/*.md` for specific function signatures
+**For API usage**: Fetch from `/api/[app-slug]/[env]/*.md` for app-specific API docs, or `/reference/*.md` for package function signatures
 **For Shopify**: Reference `/guides/plugins/shopify/*.md` extensively (21+ docs)
 **For BigCommerce**: Reference `/guides/plugins/bigcommerce/*.md` (7 docs)
 **For framework details**: Fetch `gadget-server.md` reference and action/route guides

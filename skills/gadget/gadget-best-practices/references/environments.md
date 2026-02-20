@@ -11,6 +11,42 @@
 2. Add variables for development and production
 3. Save changes
 
+**Via CLI (`ggt var`):** Manage variables from your terminal (useful for scripting and CI/CD):
+
+```bash
+# List all variable keys
+ggt var list --app my-app --env development
+
+# Get the value of a variable
+ggt var get DATABASE_URL --app my-app --env development
+
+# Set a variable (creates or updates)
+ggt var set API_KEY=abc123 --app my-app --env development
+
+# Set a secret variable (encrypted at rest, value cannot be read back)
+ggt var set SECRET_TOKEN=xyz --secret --app my-app --env development
+
+# Set multiple variables at once
+ggt var set KEY1=val1 KEY2=val2
+
+# Delete a variable
+ggt var delete API_KEY --app my-app --env development
+
+# Delete all variables (skips confirmation)
+ggt var delete --all --force
+
+# Import keys from another environment as empty placeholders
+ggt var import --from production --all --app my-app --env development
+
+# Import specific keys with their values from another environment
+ggt var import --from production --include-values API_KEY DATABASE_URL
+
+# Import variables from a .env file
+ggt var import --from-file .env.example --all
+```
+
+`-a`/`--app` and `-e`/`--env` default to the values in `.gadget/sync.json` when inside an app directory.
+
 **Variables are environment-specific** - development and production have separate values.
 
 ## Backend Variables

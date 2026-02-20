@@ -82,6 +82,24 @@ ggt add route POST-webhook
 ggt add route GET-api/users
 ```
 
+## Managing Environment Variables
+
+```bash
+ggt var list                          # List all variable keys
+ggt var get <KEY>                     # Get value of a variable
+ggt var set KEY=value                 # Set a variable (create or update)
+ggt var set KEY=value --secret        # Set an encrypted secret (unreadable after)
+ggt var delete <KEY>                  # Delete a variable
+ggt var delete --all --force          # Delete all variables, no prompt
+ggt var import --from <env> --all     # Import keys from another env as placeholders
+ggt var import --from <env> --include-values KEY1 KEY2  # Import with values
+ggt var import --from-file .env --all # Import from a .env file
+```
+
+All subcommands accept `-a`/`--app` and `-e`/`--env` (default to `.gadget/sync.json` values).
+
+See [references/environments.md](environments.md) for full details on environment variables.
+
 ## Best Practices
 
 **DO:**
