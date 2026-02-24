@@ -94,8 +94,11 @@ Gadget is a full-stack platform for building backends with integrated frontends.
 ### PACKAGE REFERENCE (/reference/*.md)
 
 **ggt CLI** (/reference/ggt.md)
-- Commands: dev | pull | push | deploy | sync | add | status | open | log | whoami
+- Commands: dev | pull | push | deploy | status | problems | add | var | eval | open | log | whoami
 - Use `ggt add` to create models, actions, routes (avoid hand-creating model folders/files)
+- Use `ggt var` to manage environment variables (list, get, set, delete, import)
+- Use `ggt eval` to run read-only JS snippets against your app's API client
+- Use `ggt problems` to check for app errors/warnings without deploying
 
 **Gelly Query Language** (/reference/gelly.md)
 - Filter operators: equals | notEquals | in | notIn | greaterThan | lessThan | startsWith | endsWith
