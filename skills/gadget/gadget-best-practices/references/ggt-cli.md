@@ -95,6 +95,51 @@ ggt add route GET-api/users
 - ❌ Add "Model" or "Table" suffixes to model names
 - ❌ Add "Id" suffix to belongsTo field names
 
+## Checking for Problems
+
+```bash
+# Show errors/warnings in your app without deploying
+ggt problems
+```
+
+## Managing Environment Variables
+
+```bash
+# List all env vars
+ggt var list
+
+# Get a specific variable
+ggt var get SECRET_KEY
+
+# Set variables
+ggt var set SECRET_KEY=abc123
+ggt var set KEY1=val1 KEY2=val2
+
+# Delete variables
+ggt var delete SECRET_KEY
+
+# Import from another environment or .env file
+ggt var import
+```
+
+Use `--app` and `--env` flags to target a specific app/environment.
+
+## Evaluating Snippets
+
+```bash
+# Run read-only queries against your app's API client
+ggt eval 'api.user.findMany()'
+ggt eval --app my-app --env staging 'api.user.findFirst()'
+
+# Allow write operations (read-only by default)
+ggt eval -w 'api.user.delete("123")'
+
+# Output as JSON
+ggt eval --json 'api.widget.findMany()'
+```
+
+The snippet receives a pre-constructed `api` variable authenticated as the developer.
+
 ## Syncing
 
 `ggt add` automatically syncs before making changes. If conflicts exist, you'll be prompted to resolve them.
@@ -107,9 +152,10 @@ ggt add route GET-api/users
 
 **When `ggt dev` is NOT running:**
 ```bash
-ggt push   # Push local changes to Gadget
-ggt pull   # Pull Gadget changes to local
-ggt status # Check sync status
+ggt push     # Push local changes to Gadget
+ggt pull     # Pull Gadget changes to local
+ggt status   # Check sync status (also shows if ggt dev is running)
+ggt problems # Check for app errors/warnings without deploying
 ```
 
 ## Reference
