@@ -140,6 +140,33 @@ ggt eval --json 'api.widget.findMany()'
 
 The snippet receives a pre-constructed `api` variable authenticated as the developer.
 
+## Managing Environments
+
+Use `ggt env` (alias: `ggt envs`) to manage environments without an active sync context.
+
+```bash
+# List all environments
+ggt env list --app my-blog
+
+# Create empty environment
+ggt env create dev-2 --app my-blog
+
+# Clone from existing environment
+ggt env create dev-2 --from development --app my-blog
+
+# Create and immediately switch to it
+ggt env create dev-2 --use --app my-blog
+
+# Switch active environment in current sync directory (updates .gadget/sync.json)
+ggt env use dev-2
+
+# Delete environment (skip confirmation with --force)
+ggt env delete dev-2 --force --app my-blog
+
+# Unpause a paused environment
+ggt env unpause dev-2 --app my-blog
+```
+
 ## Syncing
 
 `ggt add` automatically syncs before making changes. If conflicts exist, you'll be prompted to resolve them.
