@@ -10,6 +10,25 @@
 
 ## Key Hooks
 
+### useUser - Current User
+
+The simplest way to get the current authenticated user:
+
+```tsx
+import { useUser } from "@gadgetinc/react";
+
+function Profile() {
+  const user = useUser();
+
+  // Three possible states:
+  if (user === undefined) return <div>Loading...</div>;  // Still loading
+  if (!user) return <div>Not logged in</div>;             // Not authenticated
+  return <div>Hello, {user.email}</div>;                  // Authenticated
+}
+```
+
+**⚠️ Important:** `useUser()` returns **three** distinct states — `undefined` (loading), `null` (not authenticated), and a user object (authenticated). Always handle the `undefined` case to avoid flashing unauthenticated UI while the session loads.
+
 ### useFindMany - Query Multiple Records
 
 ```tsx
@@ -75,6 +94,42 @@ function CreatePost() {
   );
 }
 ```
+
+#### File Uploads with useAction
+
+Gadget file fields accept a `{ file: File }` object directly in action params:
+
+```tsx
+function CreatePostWithImage() {
+  const [{ fetching }, create] = useAction(api.post.create);
+
+  const handleSubmit = async (imageFile: File) => {
+    await create({
+      title: "My Post",
+      coverImage: { file: imageFile },  // Pass File object directly
+    });
+  };
+}
+```
+
+Display uploaded files with: `post.coverImage?.url`
+
+### Conditional Queries with pause
+
+Use `pause` to prevent a query from running until a condition is met:
+
+```tsx
+function UserPosts({ userId }: { userId: string | undefined }) {
+  const [{ data }] = useFindMany(api.post, {
+    filter: { authorId: { equals: userId! } },
+    pause: !userId,  // Don't run query until userId is available
+  });
+
+  return <div>{data?.map(post => <div key={post.id}>{post.title}</div>)}</div>;
+}
+```
+
+**⚠️ Important:** Always use `pause` when a required filter value might be `undefined` or `null`. Without `pause`, the query runs immediately with an invalid filter, which can cause errors or return unexpected results.
 
 ### useActionForm - Forms with Validation
 

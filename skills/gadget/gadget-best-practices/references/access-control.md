@@ -320,6 +320,32 @@ export const permissions: GadgetPermissions = {
 2. **Assuming transitive permissions** - Each model needs its own filter
 3. **Traversing relationships** - Prefer direct
 4. **Trying to use internal API from frontend** - It doesn't exist in the frontend
+5. **Relying on `default` for existing models** - The `default` setting on a role (`default: { read: true, action: true }`) only applies to **newly created** models. It does NOT grant access to models that already exist. You must add explicit `models` grants for every existing model the role needs:
+
+```typescript
+// ❌ Wrong — admin has no access to existing models despite `default`
+admin: {
+  storageKey: "admin",
+  default: { read: true, action: true },
+  // No models block = no access to post, user, etc.
+}
+
+// ✅ Correct — explicit grants for each model
+admin: {
+  storageKey: "admin",
+  default: { read: true, action: true },
+  models: {
+    post: {
+      read: true,
+      actions: { create: true, update: true, delete: true }
+    },
+    user: {
+      read: true,
+      actions: { changePassword: true, delete: true, signOut: true, update: true }
+    },
+  }
+}
+```
 
 ## See Also
 

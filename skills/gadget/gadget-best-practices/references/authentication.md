@@ -21,25 +21,82 @@ The `user` model includes:
 
 **⚠️ Never modify core auth fields** - they power the auth system.
 
-## Sign Up
+## Auth Action Parameter Shapes
+
+**⚠️ CRITICAL:** Auth actions take **flat** parameters — do NOT nest under `{ user: { ... } }`.
+
+### Sign Up
 
 ```javascript
-// api/models/user/actions/signUp.js (built-in)
-// Users can create accounts via:
+// ✅ Correct — flat params
 await api.user.signUp({
   email: "user@example.com",
   password: "secure-password"
 });
+
+// ❌ Wrong — nested params will cause "Variable $email was not provided" error
+await api.user.signUp({
+  user: { email: "user@example.com", password: "secure-password" }
+});
 ```
 
-## Sign In
+### Sign In
 
 ```javascript
+// ✅ Correct — flat params
 await api.user.signIn({
   email: "user@example.com",
   password: "password"
 });
+
+// ❌ Wrong — nested params
+await api.user.signIn({
+  user: { email: "user@example.com", password: "password" }
+});
 ```
+
+### Sign Out
+
+**⚠️** `signOut` requires the user's `id`:
+
+```javascript
+// ✅ Correct — must pass the user id
+await api.user.signOut({ id: user.id });
+
+// ❌ Wrong — empty object will fail
+await api.user.signOut({});
+```
+
+### Verify Email / Reset Password
+
+```javascript
+await api.user.verifyEmail({ code });
+await api.user.resetPassword({ code, password });
+```
+
+> **Key rule:** Auth actions (`signIn`, `signUp`, `signOut`, `verifyEmail`, `resetPassword`) use **flat params**. This is different from model CRUD actions which nest params under the model name (e.g., `{ post: { title: "..." } }`).
+
+## Google OAuth (Frontend)
+
+When Google OAuth is enabled in `settings.gadget.ts`, add a sign-in button that links to Gadget's built-in OAuth endpoint:
+
+```tsx
+<a href="/auth/google/start">
+  <img
+    src="https://assets.gadget.dev/assets/default-app-assets/google.svg"
+    width={20}
+    height={20}
+    alt="Google"
+  />
+  Continue with Google
+</a>
+```
+
+**Key details:**
+- The URL is always `/auth/google/start` — Gadget handles the full OAuth redirect flow
+- Must use an `<a>` tag (full page navigation), NOT a button with `onClick` — OAuth requires a server redirect
+- After success, Gadget redirects to the path configured in `settings.gadget.ts` → `redirectOnSignIn`
+- Works for both sign-in AND sign-up — Gadget auto-creates the user on first OAuth login
 
 ## Sessions
 
@@ -57,7 +114,29 @@ export const run = async ({ api, session }) => {
 };
 ```
 
-**In frontend:**
+## Frontend Auth State
+
+### useUser Hook
+
+The simplest way to get the current user in frontend components:
+
+```tsx
+import { useUser } from "@gadgetinc/react";
+
+function Profile() {
+  const user = useUser();
+
+  // Three possible states:
+  if (user === undefined) return <div>Loading...</div>;  // Still loading
+  if (!user) return <div>Not logged in</div>;             // Not authenticated
+  return <div>Hello, {user.email}</div>;                  // Authenticated
+}
+```
+
+### useSession Hook
+
+For accessing the full session object:
+
 ```tsx
 import { useSession } from "@gadgetinc/react";
 
@@ -67,6 +146,61 @@ function Profile() {
   if (!session) return <div>Not logged in</div>;
 
   return <div>Hello, {session.user.email}</div>;
+}
+```
+
+### Auth Guard Pattern
+
+```tsx
+import { useUser } from "@gadgetinc/react";
+import { useNavigate } from "react-router-dom";
+
+function ProtectedPage() {
+  const user = useUser();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (user === undefined) return; // Still loading — don't redirect yet
+    if (!user) navigate('/sign-in');
+  }, [user, navigate]);
+
+  if (!user) return null;
+  return <div>Protected content</div>;
+}
+```
+
+### Admin Role Check
+
+```tsx
+const user = useUser();
+const isAdmin = user && (user as any).roles?.some(
+  (role: any) => role.key === 'admin' || role.name === 'admin'
+);
+```
+
+## Email Verification & Password Reset Pages
+
+Gadget's built-in `sendVerifyEmail` and `sendResetPassword` actions generate email links pointing to `/verify-email?code=xyz` and `/reset-password?code=xyz`. You must create frontend pages to handle these:
+
+```tsx
+// Example: /verify-email page
+import { useSearchParams, useNavigate } from "react-router-dom";
+import { useAction } from "@gadgetinc/react";
+import { api } from "../api";
+
+function VerifyEmail() {
+  const [searchParams] = useSearchParams();
+  const code = searchParams.get("code");
+  const [{ data, fetching, error }, verifyEmail] = useAction(api.user.verifyEmail);
+
+  useEffect(() => {
+    if (code) verifyEmail({ code });
+  }, [code]);
+
+  if (fetching) return <div>Verifying...</div>;
+  if (data) return <div>Email verified!</div>;
+  if (error) return <div>Verification failed</div>;
+  return <div>No code provided</div>;
 }
 ```
 
