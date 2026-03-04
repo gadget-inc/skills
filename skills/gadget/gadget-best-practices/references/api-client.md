@@ -61,6 +61,21 @@ filter: {
 }
 ```
 
+**⚠️ Relationship Filter Gotcha:** When filtering by a `belongsTo` relationship, use the **scalar ID field** (e.g., `authorId`), NOT the relationship name. The relationship name expects a nested relationship filter object, not a simple value:
+
+```javascript
+// ✅ Correct — filter on the scalar ID field
+filter: { authorId: { equals: "user-id" } }
+
+// ❌ Wrong — "author" expects a RelationshipFilter, not { equals: "..." }
+filter: { author: { equals: "user-id" } }
+
+// ✅ Also correct — nested filter on related model's fields
+filter: { author: { email: { equals: "user@example.com" } } }
+```
+
+> **Rule of thumb:** To filter by a related record's **ID**, use the scalar field (`authorId`, `shopId`, `userId`). To filter by a related record's **other fields**, use the relationship name with nested filters (`author: { email: { equals: "..." } }`).
+
 **Combining:**
 ```javascript
 filter: {
