@@ -64,6 +64,7 @@ export const onSuccess = async ({ api, record }) => {
 - Modify record
 - Validate inputs
 - Save to database
+- Keep transactional work short (avoid long external calls)
 
 **`onSuccess`** - Side effects (after commit)
 - Send emails
@@ -99,6 +100,13 @@ export const run = async ({ params, record }) => {
   }
 };
 ```
+
+### Transaction Boundaries
+
+- Model actions are transactional by default.
+- Global actions are non-transactional by default.
+- Keep `run` focused on DB work that should commit/rollback together.
+- Move long-running or external side effects to `onSuccess`.
 
 ## Global Actions
 
@@ -274,6 +282,7 @@ export const run = async ({ logger, params }) => {
 - ✅ Enqueue long operations
 - ✅ Filter by tenant in multi-tenant apps
 - ✅ Use `api.internal` only when direct database updates are needed (bypasses permissions, validations, and action lifecycle - only available in backend code)
+- ✅ Use `_atomics` for concurrency-safe numeric counters/quantities
 
 **DON'T:**
 - ❌ Call external APIs in `run` (use `onSuccess`)
@@ -297,5 +306,5 @@ export const run = async ({ logger, params }) => {
 **📖 More info:**
 - [Action types](https://docs.gadget.dev/guides/actions/types-of-actions.md)
 - [Writing actions](https://docs.gadget.dev/guides/actions/writing-actions.md)
-- [Background actions](https://docs.gadget.dev/guides/actions/background.md)
+- [Background actions](https://docs.gadget.dev/guides/actions/background-actions)
 - [Action triggers](https://docs.gadget.dev/guides/actions/triggers.md)

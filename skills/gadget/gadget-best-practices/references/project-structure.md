@@ -22,6 +22,7 @@
 - ✅ Visit the preview URL to see your running app
 - ✅ Edit code locally, changes appear in the cloud automatically
 - ✅ Use `ggt logs` to view backend logs
+- ✅ Use `ggt problems` before commit/deploy
 
 ### Dependency Management:
 - **Gadget uses Yarn** for dependency management
@@ -107,11 +108,19 @@ api/routes/GET-users-[id].js
 
 **Always use `ggt add` commands** to modify models and fields.
 
+## Testing-Related Structure
+
+- Keep automated tests close to the code they validate, or in a consistent top-level `tests/` location.
+- Keep test environment files (for example `.env.test`) out of source control.
+- Use dedicated seed/factory helpers to make setup and teardown deterministic.
+- Keep CI and local test scripts aligned to avoid "works locally only" drift.
+
 ## Best Practices
 
 - ✅ Use `ggt add` for models/fields
 - ✅ Group related code by feature
 - ✅ Keep actions focused and small
 - ✅ Use descriptive file names
+- ✅ Keep test setup deterministic and repeatable
 - ❌ Don't edit generated files manually
 - ❌ Don't nest too deeply

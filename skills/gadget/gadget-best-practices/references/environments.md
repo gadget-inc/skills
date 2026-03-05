@@ -87,3 +87,5 @@ export const run = async ({ logger }) => {
 - ✅ Document required variables
 - ❌ Don't hardcode config in code
 - ❌ Don't expose secrets to frontend
+
+See [deployment.md](deployment.md) for how environment variables are used in CI/CD pipelines and the deploy process.
