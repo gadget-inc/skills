@@ -1,6 +1,6 @@
 # Background Jobs
 
-**📖 Full docs:** [docs.gadget.dev/guides/actions/background](https://docs.gadget.dev/guides/actions/background.md)
+**📖 Full docs:** [docs.gadget.dev/guides/actions/background-actions](https://docs.gadget.dev/guides/actions/background-actions.md)
 
 ## What Are Background Jobs?
 
@@ -220,6 +220,7 @@ Check job status in Gadget IDE:
 - ❌ Forget to log errors
 - ❌ Pass entire records as params (pass IDs instead)
 - ❌ Run synchronous operations that should be async
+- ❌ Call one action/API per record for large datasets — route calls, public API calls, and internal API calls all consume request rate limits; fan out in batches via background actions with concurrency controls instead
 
 ## Common Mistakes
 
@@ -239,5 +240,5 @@ See also:
 - [webhooks.md](webhooks.md) - Processing webhooks asynchronously
 
 **📖 More info:**
-- [Background actions](https://docs.gadget.dev/guides/actions/background.md)
+- [Background actions](https://docs.gadget.dev/guides/actions/background-actions.md)
 - [Action triggers](https://docs.gadget.dev/guides/actions/triggers.md)

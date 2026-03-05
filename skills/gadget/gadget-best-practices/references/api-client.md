@@ -312,20 +312,7 @@ await api.post.bulkDelete(["id-1", "id-2"]);
 
 ## Internal API
 
-Bypasses permissions, validations, and action lifecycle. Actions are not run when using the internal API.
-
-**Use only when direct database updates are needed** (in backend code - actions, routes):
-
-```javascript
-// Direct database update - no actions run
-const posts = await api.internal.post.create({
-  title: "My Post"
-});
-```
-
-**⚠️ The internal API does not exist in the frontend and cannot be called from frontend code**
-
-**⚠️ Important:** The internal API bypasses the action lifecycle (`run`, `onSuccess`, etc.). Use regular API calls (`api.post.create()`) if you need actions to execute.
+For direct database writes that bypass the action lifecycle, use `api.internal.*`. See [internal-api.md](internal-api.md) for when to use it, atomic updates, admin vs session context, and safety checklist.
 
 ## Best Practices
 
@@ -334,13 +321,10 @@ const posts = await api.internal.post.create({
 - ✅ Use `{ _link: "id" }` for relationships
 - ✅ Use basic or cursor-based pagination to iterate over many pages of records
 - ✅ Check `pageInfo.hasNextPage` before fetching more
-- ✅ Use internal API only when direct database updates are needed (bypasses actions)
 - ❌ Don't select all fields unnecessarily
 - ❌ Don't fetch in loops (batch instead)
-- ❌ Don't try to use internal API from frontend (it doesn't exist there)
-- ❌ Don't use internal API if you need actions to run (use regular API instead)
 
 **📖 More info:**
 - [API access patterns](https://docs.gadget.dev/guides/data-access/api.md)
-- [Filtering and sorting](https://docs.gadget.dev/guides/data-access/api.md#filtering-records)
+- [Filtering and sorting](https://docs.gadget.dev/guides/data-access/api)
 - [Frontend React hooks](https://docs.gadget.dev/reference/react.md)

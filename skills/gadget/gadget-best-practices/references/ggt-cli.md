@@ -15,11 +15,23 @@ npm install -g ggt
 ## Development Workflow
 
 **Start syncing:** Run `ggt dev` in your app directory to continuously sync local files with Gadget
-- Changes made locally → synced to Gadget environment
-- Changes made in Gadget editor → synced to local files
+- Changes made locally -> synced to Gadget environment
+- Changes made in Gadget editor -> synced to local files
 - Required for changes to take effect automatically
 
-## Adding Models
+```bash
+# Check whether sync is already active in this directory
+ggt status
+
+# Start sync only if needed
+ggt dev
+```
+
+## Scaffolding: `ggt add`
+
+Use `ggt add` for schema-safe structure changes.
+
+### Adding Models
 
 ```bash
 # Model without fields
@@ -32,7 +44,7 @@ ggt add model post title:string body:richText published:boolean
 ggt add model bigcommerce/product
 ```
 
-## Adding Fields
+### Adding Fields
 
 ```bash
 # Add field to existing model
@@ -42,8 +54,9 @@ ggt add field post/content:richText
 
 # Namespaced models
 ggt add field blogs/post/title:string
+```
 
-## Adding Actions
+### Adding Actions
 
 ```bash
 # Model-scoped action (operates on a specific record)
@@ -61,7 +74,7 @@ ggt add action notifications/sendEmail
 ggt add action admin/cleanupData
 ```
 
-### Disambiguating namespaces
+#### Disambiguating namespaces
 
 If you have models and actions with the same namespace name:
 
@@ -73,7 +86,7 @@ ggt add action model/post/audit
 ggt add action action/post/audit
 ```
 
-## Adding Routes
+### Adding Routes
 
 ```bash
 # HTTP routes (when actions aren't sufficient)
@@ -82,27 +95,27 @@ ggt add route POST-webhook
 ggt add route GET-api/users
 ```
 
-## Best Practices
+## Quality and Diagnostics
 
-**DO:**
-- ✅ Run `ggt dev` before making changes (ensures automatic syncing)
-- ✅ Use singular model names (`post`, not `posts`)
-- ✅ Use plural for hasMany/hasManyThrough fields (`comments`, `tags`)
-- ✅ Use singular for belongsTo/hasOne fields (`author`, `post`)
-
-**DON'T:**
-- ❌ Create `id`, `createdAt`, `updatedAt` fields (auto-generated)
-- ❌ Add "Model" or "Table" suffixes to model names
-- ❌ Add "Id" suffix to belongsTo field names
-
-## Checking for Problems
+### Checking for Problems
 
 ```bash
 # Show errors/warnings in your app without deploying
 ggt problems
 ```
 
-## Managing Environment Variables
+### Logs and Debugging
+
+```bash
+# Stream runtime logs
+ggt logs
+
+# Configure backend debugger integration
+ggt debugger --configure vscode
+ggt debugger --configure cursor
+```
+
+## Managing Environment Variables: `ggt var`
 
 ```bash
 # List all env vars
@@ -124,7 +137,7 @@ ggt var import
 
 Use `--app` and `--env` flags to target a specific app/environment.
 
-## Evaluating Snippets
+## Evaluating Snippets: `ggt eval`
 
 ```bash
 # Run read-only queries against your app's API client
@@ -140,7 +153,7 @@ ggt eval --json 'api.widget.findMany()'
 
 The snippet receives a pre-constructed `api` variable authenticated as the developer.
 
-## Managing Environments
+## Managing Environments: `ggt env`
 
 Use `ggt env` (alias: `ggt envs`) to manage environments without an active sync context.
 
@@ -167,6 +180,28 @@ ggt env delete dev-2 --force --app my-blog
 ggt env unpause dev-2 --app my-blog
 ```
 
+### Parallel agents with worktrees
+
+Use one local workspace per agent and one Gadget environment per workspace to prevent environment collisions and cross-agent sync conflicts:
+
+```bash
+# 1. Create a git worktree for the agent's branch
+git worktree add ../my-app-feature feature/my-feature
+
+# 2. Create a dedicated Gadget environment for it
+ggt env create feature-my-feature --from development --app my-app
+
+# 3. Start sync in the worktree pointed at its own environment
+cd ../my-app-feature
+ggt dev --env=feature-my-feature
+```
+
+After merging, clean up:
+```bash
+ggt env delete feature-my-feature --force --app my-app
+git worktree remove ../my-app-feature
+```
+
 ## Syncing
 
 `ggt add` automatically syncs before making changes. If conflicts exist, you'll be prompted to resolve them.
@@ -176,6 +211,7 @@ ggt env unpause dev-2 --app my-blog
 - ✅ **DO NOT** use `ggt push` or `ggt pull` - changes sync automatically
 - File edits are immediately reflected in your Gadget environment
 - Changes in the Gadget editor are immediately pulled to local files
+- If `ggt dev` reports an existing process, reuse it instead of starting another sync
 
 **When `ggt dev` is NOT running:**
 ```bash
@@ -184,6 +220,19 @@ ggt pull     # Pull Gadget changes to local
 ggt status   # Check sync status (also shows if ggt dev is running)
 ggt problems # Check for app errors/warnings without deploying
 ```
+
+## Best Practices
+
+**DO:**
+- ✅ Run `ggt dev` before making changes (ensures automatic syncing)
+- ✅ Use singular model names (`post`, not `posts`)
+- ✅ Use plural for hasMany/hasManyThrough fields (`comments`, `tags`)
+- ✅ Use singular for belongsTo/hasOne fields (`author`, `post`)
+
+**DON'T:**
+- ❌ Create `id`, `createdAt`, `updatedAt` fields (auto-generated)
+- ❌ Add "Model" or "Table" suffixes to model names
+- ❌ Add "Id" suffix to belongsTo field names
 
 ## Reference
 
