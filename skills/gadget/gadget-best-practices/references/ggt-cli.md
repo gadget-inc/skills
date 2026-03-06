@@ -182,25 +182,77 @@ ggt env unpause dev-2 --app my-blog
 
 ### Parallel agents with worktrees
 
-Use one local workspace per agent and one Gadget environment per workspace to prevent environment collisions and cross-agent sync conflicts:
+Run multiple AI agents simultaneously on separate Gadget environments to explore different approaches or work on independent features without conflicts. Gadget development environments are unlimited, so you can spin up as many as needed.
+
+Each parallel agent gets its own:
+- **Local workspace**: A git worktree (or separate clone)
+- **Gadget environment**: A separate cloud sandbox with its own database, API, and runtime
 
 ```bash
 # 1. Create a git worktree for the agent's branch
-git worktree add ../my-app-feature feature/my-feature
+git worktree add ../agent-feature
+cd ../agent-feature
 
-# 2. Create a dedicated Gadget environment for it
-ggt env create feature-my-feature --from development --app my-app
+# 2. Create a dedicated Gadget environment (--use updates .gadget/sync.json automatically)
+ggt env create agent-feature --use
 
-# 3. Start sync in the worktree pointed at its own environment
-cd ../my-app-feature
-ggt dev --env=feature-my-feature
+# 3. Copy environment variables from development (non-secret values only)
+ggt var import --from development --all --include-values
+# Set any required secret variables manually:
+# ggt var set MY_SECRET=value --secret
+
+# 4. Push local code to the new environment
+ggt push --force
+
+# 5. Start sync so the agent can build and test against it
+ggt dev
+```
+
+Open your AI coding tool (Claude Code, Cursor, Codex, etc.) in the worktree directory. The agent develops against the new environment without affecting other agent workspaces.
+
+Repeat the setup for each additional agent:
+
+```bash
+# From your main app directory
+git worktree add ../agent-feature-2
+cd ../agent-feature-2
+ggt env create agent-feature-2 --use
+ggt var import --from development --all --include-values
+ggt push --force
 ```
 
 After merging, clean up:
+
 ```bash
-ggt env delete feature-my-feature --force --app my-app
-git worktree remove ../my-app-feature
+ggt env delete agent-feature --force
+git worktree remove ../agent-feature
 ```
+
+**Tips:**
+
+* Name environments descriptively: `agent-checkout-redesign`, `codex-auth-fix`
+* Keep the workspace, git branch, and Gadget environment name aligned for easy tracking
+* Run `ggt var list` in the new workspace to verify variables are set before starting an agent
+* Automate the setup by wrapping `ggt env create`, `ggt var import`, and `ggt push` in a shell script
+
+Full guide: https://docs.gadget.dev/guides/development-tools/working-with-agents/working-in-parallel
+
+## Agent Plugin: `ggt agent-plugin`
+
+Installs `AGENTS.md` and Gadget skill reference files into your project, giving AI coding agents (Claude Code, Cursor, Codex, etc.) Gadget-specific platform context automatically.
+
+```bash
+# Install for the first time
+ggt agent-plugin install
+
+# Update existing files to the latest version
+ggt agent-plugin update
+
+# Force reinstall even if files already exist
+ggt agent-plugin install --force
+```
+
+Use `ggt agent-plugin update` (not `install --force`) to upgrade already-installed files. The `--force` flag is only needed to overwrite files in a fresh install scenario.
 
 ## Syncing
 
