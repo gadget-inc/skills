@@ -76,6 +76,7 @@ Gadget is a full-stack platform for building backends with integrated frontends.
 #### Development Tools (/guides/development-tools/*.md)
 - logger | cli | environment-variables | terminal | typescript-support | unit-testing | framework-linter | rate-limits | runtime-environment | operations-dashboard | debugging-and-profiling | keyboard-shortcuts
 - ai-assistant/features | ai-assistant/prompt-guide
+- working-with-agents/working-in-parallel (guide for running multiple AI agents in parallel using git worktrees + separate Gadget environments)
 
 #### Environments & Deployment (/guides/environments/*.md)
 - (overview) | deployment | ci-cd | custom-domains | development-pausing
@@ -103,9 +104,10 @@ Gadget is a full-stack platform for building backends with integrated frontends.
 ### PACKAGE REFERENCE (/reference/*.md)
 
 **ggt CLI** (/reference/ggt.md)
-- Commands: dev | pull | push | deploy | sync | add | var | status | open | log | whoami
+- Commands: dev | pull | push | deploy | sync | add | var | status | open | log | whoami | agent-plugin
 - Use `ggt add` to create models, actions, routes (avoid hand-creating model folders/files)
 - Use `ggt var` to manage environment variables (list/get/set/delete/import)
+- Use `ggt agent-plugin install` to add `AGENTS.md` and Gadget skill files to a project for the first time; use `ggt agent-plugin update` to upgrade existing files to the latest version
 
 **Gelly Query Language** (/reference/gelly.md)
 - Filter operators: equals | notEquals | in | notIn | greaterThan | lessThan | startsWith | endsWith
