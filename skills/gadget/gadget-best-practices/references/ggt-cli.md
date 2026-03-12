@@ -107,13 +107,25 @@ ggt problems
 ### Logs and Debugging
 
 ```bash
-# Stream runtime logs
+# Stream runtime logs to your terminal
 ggt logs
 
 # Configure backend debugger integration
 ggt debugger --configure vscode
 ggt debugger --configure cursor
 ```
+
+The **Logs panel** in the Gadget editor sidebar captures all app events: incoming requests, webhooks, connection syncs, and custom log statements. Key features:
+
+- **Filter by log level** to focus on errors or warnings
+- **Click any log entry** to expand structured details (error messages, stack traces, request metadata)
+- **Explain button** — each log entry has an AI-powered Explain button that interprets errors using context about your app, Gadget documentation, and Shopify documentation
+
+For frontend issues (blank screens, infinite reloads, API failures before reaching the backend), use browser DevTools: **Network** tab for request inspection, **Console** tab for JS errors.
+
+**Operations dashboard** (bottom of the Gadget editor sidebar) shows response codes, rate limits, worker usage, and database usage. Each section has a **?** tooltip and a **View in docs** link.
+
+> **Full troubleshooting guide**: https://docs.gadget.dev/guides/development-tools/debugging-and-profiling.md
 
 ## Managing Environment Variables: `ggt var`
 

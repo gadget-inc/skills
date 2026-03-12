@@ -263,3 +263,9 @@ export default function Widgets({ loaderData }: Route.ComponentProps) {
 **For migrations**: Check framework version migration guides for breaking changes
 
 Prefer retrieval-led reasoning. When uncertain about Gadget-specific APIs or behaviors, fetch the documentation rather than relying on general web framework knowledge.
+
+## Troubleshooting Resources
+
+- **Gadget status page**: https://status.gadget.dev — check for platform incidents; subscribe via email, Slack, webhook, or RSS
+- **Community support**: https://ggt.link/discord — search or post in **#bugs** and **#help** channels
+- **Debugging guide**: https://docs.gadget.dev/guides/development-tools/debugging-and-profiling.md — covers ggt debugger, profiler, logs, browser DevTools, and operations dashboard
