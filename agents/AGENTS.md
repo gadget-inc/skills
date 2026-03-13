@@ -33,7 +33,7 @@ Gadget is a full-stack platform for building backends with integrated frontends.
 ### GUIDES (/guides/*.md)
 
 #### Getting Started (/guides/getting-started/*.md)
-- what-is-gadget | how-to-build-a-gadget-app | how-is-gadget-different-from-x | quickstarts/web-quickstart | quickstarts/bigcommerce-quickstart
+- what-is-gadget | how-to-build-a-gadget-app | how-is-gadget-different-from-x | quickstarts/web-quickstart (simplified 2-step guide: create app at gadget.new → click Play to preview) | quickstarts/bigcommerce-quickstart
 
 #### Models (/guides/models/*.md)
 - overview | fields | storing-files | relationships | namespaces
@@ -84,7 +84,7 @@ Gadget is a full-stack platform for building backends with integrated frontends.
 - source-control | templates | account-and-billing | account-and-billing/optimizing-your-bill | faq | glossary | gadget-framework
 
 #### Tutorials (/guides/tutorials/*.md)
-- ai-screenwriter | automated-product-tagger | middleware
+- web-app (Gadgemon full-stack tutorial, replaces former ai-screenwriter) | automated-product-tagger | middleware
 - bigcommerce/product-search-keywords | bigcommerce/size-charts
 - chatgpt/todo-list
 - shopify/ui-extension | shopify/theme-app-extensions
