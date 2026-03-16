@@ -262,6 +262,45 @@ For Shopify apps, auth is automatic:
 const shopId = connections.shopify.currentShopId;
 ```
 
+## Multi-Tenant Email Transporters
+
+For Shopify apps where each shop needs its own SMTP credentials (e.g., using SES, SendGrid, or Mailgun with per-shop API keys), **do not** configure a global transporter in a boot file. Instead, resolve the tenant and set the transporter inside the action:
+
+```typescript
+// api/actions/sendShopEmail.ts
+import { emails } from "gadget-server";
+
+export const run: GlobalActionRun = async ({ params, connections, api }) => {
+  const shopId = connections.shopify.currentShopId;
+
+  // Fetch shop-specific credentials
+  const settings = await api.shopSettings.findFirst({
+    filter: { shop: { id: { equals: shopId } } },
+  });
+
+  // Set the transporter for this action's scope, then send immediately
+  await emails.setTransport({
+    type: "smtp",
+    host: settings.smtpHost,
+    auth: { user: settings.smtpUser, pass: settings.smtpPass },
+  });
+
+  await emails.sendMail({
+    from: settings.senderEmail,
+    to: params.recipientEmail,
+    subject: params.subject,
+    html: params.body,
+  });
+};
+```
+
+**Key rules:**
+- Call `emails.setTransport()` and `emails.sendMail()` in the **same action** — the transport is scoped to the action execution
+- Do **not** define a global transporter in a boot file if credentials vary per shop/tenant
+- Query the settings model inside the action each time to ensure correct credentials
+
+**📖 More info:** [Email/password auth](https://docs.gadget.dev/guides/plugins/authentication/email-pass.md)
+
 ## BigCommerce Auth
 
 Similar to Shopify:
