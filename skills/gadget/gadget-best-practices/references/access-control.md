@@ -16,8 +16,9 @@ Gadget has a built-in RBAC system. All operations automatically enforce permissi
 ### Built-In Roles
 
 **unauthenticated** - Public access
-**signed-in** - Authenticated users
+**signed-in** - Authenticated users (auto-created by the Authentication plugin)
 **system-admin** - Super user (never grant explicitly - has all permissions)
+**app-user** - Auto-created for merchant sessions via Shopify and BigCommerce connections (one per connected store)
 
 ### Custom Roles
 

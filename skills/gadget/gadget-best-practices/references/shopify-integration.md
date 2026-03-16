@@ -175,6 +175,7 @@ See [shopify-multi-tenancy.md](shopify-multi-tenancy.md) for complete patterns.
 3. **Blocking webhook handlers** - Use `api.enqueue()`
 4. **Ignoring rate limits** - Automatic, but enqueue bulk operations
 5. **Missing GDPR webhooks** - Violates Shopify requirements
+6. **Adding packages without `-W` in workspaces** - When the `package.json` has a `workspaces` array (common in Shopify extension projects), always use `yarn add -W <package>` to install packages at the root workspace level, otherwise the package is installed inside the extension workspace instead
 
 ## Best Practices
 
@@ -184,6 +185,7 @@ See [shopify-multi-tenancy.md](shopify-multi-tenancy.md) for complete patterns.
 - ✅ Handle GDPR webhooks
 - ✅ Make webhooks idempotent
 - ✅ Test with development store
+- ✅ Use `yarn add -W <package>` when workspace extensions are present
 
 ## See Also
 

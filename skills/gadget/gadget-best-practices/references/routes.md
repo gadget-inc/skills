@@ -44,7 +44,26 @@ export default async function (request, reply) {
 }
 ```
 
-**Access:** `https://your-app.gadget.app/hello`
+**Access:**
+- Production: `https://your-app.gadget.app/<route-path>`
+- Development: `https://your-app--development.gadget.app/<route-path>`
+
+## Calling Routes from the Frontend
+
+To call HTTP routes from the Gadget React frontend with correct auth headers automatically applied:
+
+```tsx
+import { useFetch } from "@gadgetinc/react";
+
+// JSON response
+const [{ data, fetching, error }] = useFetch("/hello", { json: true });
+
+// Or use the api client directly in loaders/actions
+const result = await api.fetch("/hello");
+const data = await result.json();
+```
+
+Using `useFetch` or `api.fetch` ensures the Gadget session cookie is included automatically. Do **not** use bare `fetch()` to call Gadget routes from the frontend — authentication headers won't be set.
 
 ## Request/Reply Objects
 
