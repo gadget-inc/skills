@@ -45,6 +45,10 @@ Fix: use generated client methods; confirm action exists and namespacing is corr
 Cause: existing records no longer satisfy new schema constraints.
 Fix: backfill/migrate records or relax validation temporarily; use internal API carefully for repair operations.
 
+- `GGT_INVALID_ID`
+Cause: invalid record ID string passed to an ID field or relationship `_link` (e.g., `abc123` or `123n` instead of a plain numeric string).
+Fix: ensure IDs passed to record lookups and `_link` are valid numeric strings (e.g., `"123"`).
+
 - `GGT_MISCONFIGURED_VALIDATION` / `GGT_MISCONFIGURED_FIELD`
 Cause: model validation or field configuration is incomplete/invalid.
 Fix: correct model config in editor and re-run checks.
