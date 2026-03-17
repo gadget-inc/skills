@@ -93,6 +93,37 @@ Notes:
 - Conditionally webhook-synced child models can update when parent `hasMany` fields are set to fetch on webhook.
 - Fully non-webhook models update only during sync (including `scheduledShopifySync`).
 
+### Reducing Echo Webhook Costs (includeFields)
+
+When you write a field back to Shopify inside a webhook-triggered action, Shopify fires a new webhook because the record changed — an "echo" webhook. This runs your action a second time at **2.0 full action execution credits** unnecessarily.
+
+Prevent this by using `includeFields` in action options to exclude the fields you're writing back:
+
+```javascript
+// api/models/shopifyProduct/actions/update.js
+export const options: ActionOptions = {
+  triggers: { api: true },
+  includeFields: ["title", "description"],  // Exclude "tags" — we write it back to Shopify
+};
+
+export const run = async ({ record, connections }) => {
+  const newTags = computeTags(record);
+
+  // Update locally without triggering an echo webhook
+  record.tags = newTags;
+  await record.save();
+
+  // Write back to Shopify
+  await connections.shopify.current.graphql(`mutation { productUpdate(input: { id: "${record.id}", tags: "${newTags}" }) { product { id } } }`);
+};
+```
+
+With `includeFields` excluding the field, the echo check costs only **0.2 credits** (idempotency check) instead of 2.0.
+
+⚠️ **Warning:** Excluding a field with `includeFields` also means external mutations to that field won't trigger your action.
+
+📖 More info: [Optimizing your bill](https://docs.gadget.dev/guides/account-and-billing/optimizing-your-bill.md)
+
 ### Shopify API Access
 
 ```javascript

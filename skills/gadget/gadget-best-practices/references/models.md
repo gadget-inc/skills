@@ -407,6 +407,17 @@ The `user` model typically includes:
 
 **Add custom fields, but don't modify the core authentication fields.**
 
+## Model Namespaces
+
+Models can be organized into namespaces (subdirectories) to group related models. A model at `api/models/analytics/event/` has namespace `analytics` and API identifier `analytics/event`.
+
+- Create namespaced models: `ggt add model analytics/event`
+- API access uses the namespace path: `api["analytics/event"].findMany()`
+- Use namespaces to group domain-related models (e.g., all analytics models under `analytics/`)
+- Namespaces appear as folders in the IDE model explorer
+
+📖 More info: [Model namespaces](https://docs.gadget.dev/guides/models/namespaces.md)
+
 ## Summary
 
 **DO:**

@@ -24,6 +24,7 @@ Use Internal API as an explicit low-level tool. Prefer Public API unless you nee
 ## Core behavior and limits
 
 - Internal API skips action lifecycle (`run`, `onSuccess`) and most validations.
+- Internal API only exposes low-level read and write operations — **custom actions are not available** through the internal API. Use regular API calls (e.g., `api.post.publish()`) when you need actions to execute.
 - Internal API is backend-only (`api.internal` is unavailable in frontend code).
 - Internal API does not support live queries (`live: true`).
 - Internal API does not support nested writes for related records.
