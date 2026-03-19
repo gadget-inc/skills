@@ -74,7 +74,7 @@ Gadget is a full-stack platform for building backends with integrated frontends.
 - (plugins overview at /guides/plugins) | extending-gadget | sentry
 
 #### Development Tools (/guides/development-tools/*.md)
-- logger | cli | environment-variables | terminal | typescript-support | unit-testing | framework-linter | rate-limits | runtime-environment | operations-dashboard | debugging-and-profiling | keyboard-shortcuts
+- logger | cli | environment-variables | terminal | typescript-support | unit-and-integration-testing | framework-linter | rate-limits | runtime-environment | operations-dashboard | debugging-and-profiling | keyboard-shortcuts
 - ai-assistant/features | ai-assistant/prompt-guide
 
 #### Environments & Deployment (/guides/environments/*.md)
