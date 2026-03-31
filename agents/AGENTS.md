@@ -74,37 +74,39 @@ Gadget is a full-stack platform for building backends with integrated frontends.
 - (plugins overview at /guides/plugins) | extending-gadget | sentry
 
 #### Development Tools (/guides/development-tools/*.md)
-- logger | cli | environment-variables | terminal | typescript-support | unit-testing | framework-linter | rate-limits | runtime-environment | operations-dashboard | debugging-and-profiling | keyboard-shortcuts
-- ai-assistant/features | ai-assistant/prompt-guide
+- logger | cli | environment-variables | terminal | typescript-support | unit-and-integration-testing | e2e-testing | framework-linter | rate-limits | runtime-environment | operations-dashboard | debugging-and-profiling | keyboard-shortcuts
+- ai-assistant | ai-assistant/features
+- working-with-agents | working-with-agents/prompt-guide | working-with-agents/working-in-parallel
 
 #### Environments & Deployment (/guides/environments/*.md)
 - (overview) | deployment | ci-cd | custom-domains | development-pausing
 
 #### Other Guides
-- source-control | templates | account-and-billing | account-and-billing/optimizing-your-bill | faq | glossary | gadget-framework
+- source-control | templates | account-and-billing | account-and-billing/optimizing-your-bill | changelog | faq | glossary | gadget-framework
 
 #### Tutorials (/guides/tutorials/*.md)
-- ai-screenwriter | automated-product-tagger | middleware
+- automated-product-tagger | middleware | web-app
+- bigcommerce | shopify
 - bigcommerce/product-search-keywords | bigcommerce/size-charts
 - chatgpt/todo-list
 - shopify/ui-extension | shopify/theme-app-extensions
 
 #### Framework Migrations (/guides/gadget-framework/*.md)
-- v1-migration | v1-3-migration | v1-4-migration
+- v1-migration | v1-3-migration | v1-4-migration | v1-7-migration
 
-### API REFERENCE (/api/[app-slug]/[environment]/*.md)
+### API REFERENCE (/api/:slug/:environmentSlug/*.md)
 
 **Context**: Auto-generated per-app API documentation. These pages reference YOUR specific models, actions, and configuration.
 
 - (root) | gadget-record | background-action-handle | sorting-and-filtering | errors | internal-api | api-calls-within-gadget | using-with-react
-- schema/[model] | schema/global-actions | schema/global-views
+- schema/:model | schema/global-actions | schema/global-views
 - external-api-calls | external-api-calls/installing | external-api-calls/authentication | external-api-calls/graphql
 
 ### PACKAGE REFERENCE (/reference/*.md)
 
 **ggt CLI** (/reference/ggt.md)
-- Commands: dev | pull | push | deploy | sync | add | var | status | open | log | whoami
-- Use `ggt add` to create models, actions, routes (avoid hand-creating model folders/files)
+- Commands: dev | debugger | logs | problems | eval | deploy | status | push | pull | var | model | action | add | env | configure | completion | open | list | agent-plugin | login | logout | whoami | version
+- Prefer `ggt model` and `ggt action` for models and actions; use `ggt add` for fields, routes, and environments
 - Use `ggt var` to manage environment variables (list/get/set/delete/import)
 
 **Gelly Query Language** (/reference/gelly.md)
@@ -255,7 +257,7 @@ export default function Widgets({ loaderData }: Route.ComponentProps) {
 - `https://docs.gadget.dev/reference/gadget-server.md`
 
 **For implementation questions**: Fetch from `/guides/*.md` for conceptual overviews and patterns
-**For API usage**: Fetch from `/api-reference/*.md` or `/reference/*.md` for specific function signatures
+**For API usage**: Fetch per-app docs from `/api/<app-slug>/<environment-slug>/*.md` or package docs from `/reference/*.md` for specific function signatures
 **For Shopify**: Reference `/guides/plugins/shopify/*.md` extensively (21+ docs)
 **For BigCommerce**: Reference `/guides/plugins/bigcommerce/*.md` (7 docs)
 **For framework details**: Fetch `gadget-server.md` reference and action/route guides

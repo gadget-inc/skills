@@ -106,7 +106,9 @@ api/routes/GET-users-[id].js
 - `.gadget/schema/**` - Auto-generated schemas
 - `.gadget/client/` - Auto-generated API client
 
-**Always use `ggt add` commands** to modify models and fields.
+**Always use `ggt` scaffolding commands** to modify models and fields:
+- `ggt model add|rename|remove` for models
+- `ggt add field` for fields
 
 ## Testing-Related Structure
 
@@ -117,7 +119,7 @@ api/routes/GET-users-[id].js
 
 ## Best Practices
 
-- ✅ Use `ggt add` for models/fields
+- ✅ Use `ggt model` for models and `ggt add field` for fields
 - ✅ Group related code by feature
 - ✅ Keep actions focused and small
 - ✅ Use descriptive file names
