@@ -9,7 +9,7 @@ In Gadget, a **model** represents a database table. Each table row is a **record
 - Models define the schema for storing data
 - Each model auto-generates a GraphQL API for CRUD operations
 - Models support relationships, validations, and computed fields
-- Created with `ggt add model <name>` 
+- Created with `ggt model add <name> [field:type ...]`
 
 **IMPORTANT:** Use the [ggt CLI](ggt-cli.md) to add models
 

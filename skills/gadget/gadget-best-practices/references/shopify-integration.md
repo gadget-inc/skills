@@ -19,6 +19,21 @@ See [shopify-multi-tenancy.md](shopify-multi-tenancy.md) for complete tenancy pa
 
 ## Key Patterns
 
+### TOML Is the Source of Truth (Framework 1.7.0+)
+
+In framework `1.7.0+`, Shopify app configuration is TOML-driven. Treat the primary TOML file for the environment as the source of truth for Shopify app configuration:
+
+- `shopify.app.toml` for production
+- `shopify.app.{environment-name}.toml` for non-production environments
+
+Scopes, app metadata, URLs, and app-managed webhook subscriptions are defined there. Do not treat `settings.gadget.ts` or legacy webhook status fields like `registeredWebhooks` as authoritative in `v1.7+` apps.
+
+For global actions with Shopify webhook triggers, action code references TOML-managed subscriptions via `triggerKey`, while the subscription itself lives in `[[webhooks.subscriptions]]` in TOML.
+
+See:
+- [Shopify App TOML](https://docs.gadget.dev/guides/plugins/shopify/advanced-topics/shopify-app-toml.md)
+- [Framework v1.7 migration](https://docs.gadget.dev/guides/gadget-framework/v1-7-migration.md)
+
 ### Webhook Triggers
 
 Shopify model actions will automatically trigger on relevant Shopify webhooks
