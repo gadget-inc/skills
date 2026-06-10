@@ -10,6 +10,8 @@ Fields define the columns in your database tables (models). Each field has:
 - **Validations** - Rules for valid data
 - **Options** - Type-specific configuration
 
+Use [`ggt field`](ggt-cli.md) to add, remove, or rename fields from local development. It supports required/unique flags, relationship fields with `--to` and `--through`, and Shopify metafield-backed fields with `--metafield`.
+
 ## Field Types
 
 ### Text Fields
@@ -337,14 +339,14 @@ export const schema: GadgetModel = {
 
 When adding fields to existing models:
 
-1. **Use `ggt add field`** command (see **gadget-cli** skill)
+1. **Use `ggt field add`** command (see [ggt-cli.md](ggt-cli.md))
 2. **Never manually edit** `.gadget/schema/...` files
 3. **Always run `ggt dev`** during development for auto-sync
 
 Example:
 ```bash
-ggt add field post/publishedAt:dateTime
-ggt add field post/status:enum --options=draft,published,archived
+ggt field add post/publishedAt:dateTime
+ggt field add post/status:enum
 ```
 
 ## Summary

@@ -11,7 +11,7 @@ In Gadget, a **model** represents a database table. Each table row is a **record
 - Models support relationships, validations, and computed fields
 - Created with `ggt model add <name> [field:type ...]`
 
-**IMPORTANT:** Use the [ggt CLI](ggt-cli.md) to add models
+**IMPORTANT:** Use the [ggt CLI](ggt-cli.md) to add, enable, remove, or rename models.
 
 ## Naming Conventions
 

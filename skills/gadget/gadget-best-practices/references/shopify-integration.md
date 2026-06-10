@@ -4,9 +4,19 @@
 
 ## Setup
 
-1. Add Shopify connection in Gadget web editor
+Use `ggt shopify connect` for CLI setup when working locally. It imports the local Shopify CLI session, creates the Gadget Shopify connection files, and syncs them into the project. The command requires a Gadget app on framework version 1.7 or newer.
+
+```bash
+shopify auth login
+ggt shopify connect
+ggt shopify status
+```
+
+`ggt shopify status` reports the Shopify API version, enabled Shopify models, requested scopes, webhook topics, authenticated partner account, connected app name, and client ID.
+
+1. Add or connect the Shopify connection
 2. Configure OAuth scopes (read_products, write_orders, etc.)
-3. Shopify models auto-created (Product, Order, Customer, etc.)
+3. Enable Shopify models with `ggt model add <path> --type shopify` when needed
 4. Install flow automatic
 
 **Result:** `shopifyShop` model tracks installed shops, webhooks registered, OAuth handled.
@@ -55,7 +65,16 @@ export const run = async ({ params, record, connections }) => {
 
 ### Syncing
 
-Syncs can be kicked off from the Gadget web editor or using the sync API:
+Syncs can be kicked off with `ggt shopify sync`, from the Gadget web editor, or using the sync API:
+
+```bash
+ggt shopify sync
+ggt shopify sync --store mystore.myshopify.com
+ggt shopify sync --models shopifyProduct,shopifyOrder --last 50
+ggt shopify sync --all
+```
+
+By default, `ggt shopify sync` syncs the last 10 records per Shopify model. Use `--store`, `--shop-ids`, `--models`, `--since`, `--last`, and `--all` to target the sync.
 
 ```typescript
 export const onSuccess: ActionOnSuccess = async ({ record, api }) => {
