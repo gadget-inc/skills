@@ -44,8 +44,11 @@ Useful notes:
 
 Prefer the dedicated command groups when available:
 - Use `ggt model` for model add, rename, and remove flows.
+- Use `ggt field` for field add, rename, and remove flows.
 - Use `ggt action` for global and model-scoped actions.
-- Keep using `ggt add` for fields, routes, environments, and namespace-disambiguated scaffolding.
+- Keep using `ggt add` for routes, environments, and namespace-disambiguated scaffolding.
+
+For domain guidance, see [models.md](models.md), [fields.md](fields.md), [actions.md](actions.md), and [routes.md](routes.md).
 
 ### Models with `ggt model`
 
@@ -59,10 +62,18 @@ ggt model add post title:string body:string published:boolean
 # Namespaced model
 ggt model add bigcommerce/product
 
+# Enable a Shopify sync model
+ggt model add shopifyProduct --type shopify
+
+# Enable a Shopify model at a custom path
+ggt model add shopify/product --type shopify --resource shopifyProduct
+
 # Rename or remove
 ggt model rename post article
 ggt model remove article --force
 ```
+
+`--type shopify` enables an existing Shopify resource model. Use `--resource <shopifyModelKey>` when the model path is namespaced or does not exactly match the Shopify model key. See [shopify-integration.md](shopify-integration.md) for Shopify app patterns.
 
 ### Actions with `ggt action`
 
@@ -79,16 +90,61 @@ ggt action add sendDigest
 ggt action add notifications/sendEmail
 ```
 
-### Fields, routes, and environments with `ggt add`
+### Fields with `ggt field`
 
 ```bash
 # Add field to existing model
-ggt add field post/published:boolean
-ggt add field post/viewCount:number
-ggt add field post/content:richText
+ggt field add post/published:boolean
+ggt field add post/viewCount:number
+ggt field add post/content:richText
 
 # Namespaced models
-ggt add field blogs/post/title:string
+ggt field add blogs/post/title:string
+
+# Field options
+ggt field add user/email:email --required --unique
+
+# Remove or rename fields
+ggt field remove post/title
+ggt field remove post/title --force
+ggt field rename post/title post/heading
+ggt field rename shopify/order/note shopify/order/internalNote
+```
+
+`ggt field add` accepts `--required` and `--unique` for field validations.
+
+### Relationship Fields
+
+Use `--to` for relationship fields. It is required for `belongsTo`, `hasOne`, `hasMany`, and `hasManyThrough`. Use `--through` for `hasManyThrough`.
+
+```bash
+ggt field add post/author:belongsTo --to user
+ggt field add user/posts:hasMany --to post
+ggt field add post/tags:hasManyThrough --to tag --through postTag
+```
+
+Use `--inverse-field` when the auto-generated inverse field name should be overridden:
+
+```bash
+ggt field add post/author:belongsTo --to user --inverse-field authoredPosts
+```
+
+See [relationships.md](relationships.md) for relationship modeling patterns.
+
+### Shopify Metafield Fields
+
+Use `--metafield` to link a Gadget field to a Shopify metafield. `--namespace` and `--metafield-type` are required; `--key` defaults to the field name; `--list` marks the metafield as a list value.
+
+```bash
+ggt field add shopifyProduct/spiciness:string --metafield --namespace custom --metafield-type single_line_text_field
+ggt field add shopifyProduct/ingredients:string --metafield --namespace custom --key ingredients --metafield-type single_line_text_field --list
+```
+
+See [shopify-integration.md](shopify-integration.md) for Shopify metafield usage patterns.
+
+### Routes and Environments with `ggt add`
+
+```bash
 
 # HTTP routes (when actions aren't sufficient)
 ggt add route GET-hello
@@ -110,6 +166,34 @@ ggt add action model/post/audit
 # Explicitly specify action namespace
 ggt add action action/post/audit
 ```
+
+## Shopify Commands
+
+Use `ggt shopify` to manage a Gadget app's Shopify connection from the CLI. These commands require a Gadget app on framework version 1.7 or newer.
+
+```bash
+# Import the local Shopify CLI session and create/sync connection files
+ggt shopify connect
+ggt shopify connect --app-name my-shop
+ggt shopify connect --shopify-organization-id 123456789
+
+# Inspect Shopify API version, enabled models, requested scopes, webhook topics,
+# authenticated partner account, connected app name, and client ID
+ggt shopify status
+
+# Start Shopify data syncs for installed shops
+ggt shopify sync
+ggt shopify sync --store mystore.myshopify.com
+ggt shopify sync --shop-ids 1,2,3
+ggt shopify sync --models shopifyProduct,shopifyOrder
+ggt shopify sync --since 2024-01-01
+ggt shopify sync --last 50
+ggt shopify sync --all
+```
+
+`ggt shopify sync` syncs the last 10 records per Shopify model by default. Use `--last <count>` to change the per-model limit or `--all` to sync all matching records.
+
+See [shopify-integration.md](shopify-integration.md) and [shopify-multi-tenancy.md](shopify-multi-tenancy.md) for Shopify implementation patterns.
 
 ## Quality and Diagnostics
 
@@ -197,6 +281,8 @@ The snippet receives a pre-constructed `api` variable authenticated as the devel
 
 Use `ggt env` (alias: `ggt envs`) to manage environments without an active sync context.
 
+See [environments.md](environments.md) for environment variable and multi-environment strategy.
+
 ```bash
 # List all environments
 ggt env list --app my-blog
@@ -249,7 +335,7 @@ git worktree remove ../my-app-feature
 
 ## Syncing and Deploying
 
-`ggt add`, `ggt model`, `ggt action`, and `ggt deploy` sync before making changes. If conflicts exist, you'll be prompted to resolve them.
+`ggt add`, `ggt model`, `ggt field`, `ggt action`, and `ggt deploy` sync before making changes. If conflicts exist, you'll be prompted to resolve them.
 
 **When `ggt dev` is running:**
 - Changes are automatically synced in both directions
@@ -326,7 +412,7 @@ ggt version
 
 **DO:**
 - ✅ Run `ggt dev` before making changes when you want continuous syncing
-- ✅ Use `ggt model` and `ggt action` instead of hand-creating model or action files
+- ✅ Use `ggt model`, `ggt field`, and `ggt action` instead of hand-creating model, field, or action files
 - ✅ Use singular model names (`post`, not `posts`)
 - ✅ Use plural for hasMany/hasManyThrough fields (`comments`, `tags`)
 - ✅ Use singular for belongsTo/hasOne fields (`author`, `post`)

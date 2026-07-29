@@ -1,6 +1,6 @@
 ---
 name: gadget-best-practices
-description: Best practices for building with Gadget. Use when developers need guidance on models, actions, routes, access control, Shopify/BigCommerce integrations, frontend patterns, API usage, testing setup, CI verification, ggt workflows, debugging, or parallel agent development loops. Triggers "model", "action", "route", "permission", "access control", "multi-tenancy", "Shopify", "BigCommerce", "frontend", "API client", "internal API", "filter", "sort", "pagination", "webhook", "background job", "testing", "ci", "ggt", "debugger", "logs", "problems"
+description: Best practices for building Gadget apps. Use for Gadget-specific models, fields, actions, routes, access control, Shopify/BigCommerce integrations, frontend patterns, API client usage, internal API usage, webhooks, background jobs, testing, deployment, ggt CLI workflows, environment sync, logs, problems, and parallel agent development loops.
 ---
 
 ## How to use
