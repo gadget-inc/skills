@@ -1,0 +1,11 @@
+{
+  "name": "gadget-migration-cutover-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-timeout=60000 \"*.integration.ts\""
+  },
+  "dependencies": {
+    "graphql": "16.11.0"
+  }
+}

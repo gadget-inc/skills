@@ -13,7 +13,7 @@ export const settings: GadgetSettings = {
     },
     authentications: {
       signInPath: "/sign-in",
-      methods: { emailPassword: true },
+      methods: { emailPassword: true, googleOAuth: { scopes: ["email", "profile"] } },
     },
   },
 };

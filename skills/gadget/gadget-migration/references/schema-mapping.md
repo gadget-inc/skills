@@ -2,7 +2,9 @@
 
 ## What is this?
 
-Each Gadget model becomes a table, and each stored field becomes a column. Gadget's internal column names mean nothing outside Gadget, so name columns after the field's API identifier, in snake_case: `totalPrice` becomes `total_price`. The field types are in each model's `schema.gadget.ts`, and `scripts/inventory.ts` lists them.
+Each Gadget model becomes a table, and each stored field becomes a column. Gadget's internal column names mean nothing outside Gadget, so name columns after the field's API identifier, in snake_case: `totalPrice` becomes `total_price`. The field types are in each model's `schema.gadget.ts`, and `scripts/inventory.ts` lists them with a suggested table name.
+
+Every model also has `id`, `createdAt`, and `updatedAt`, which its schema file does not list. Keep all three: `updated_at` is what the catch-up export in [data-export.md](data-export.md) compares.
 
 ## Field types
 
@@ -10,28 +12,30 @@ Each Gadget model becomes a table, and each stored field becomes a column. Gadge
 |---|---|---|
 | id | `bigint` primary key. Keep the exported values | `BigInt @id @default(autoincrement())`, or `BigInt @id` for Shopify models |
 | `string`, `email`, `url`, `color` | `text`, with a `check` for validations you relied on | `String` |
-| `number` | `numeric` | `Decimal` |
+| `number` | `numeric` | `Decimal @db.Decimal` |
 | `boolean` | `boolean` | `Boolean` |
-| `dateTime` | `timestamptz`, or `date` when `includeTime` is false | `DateTime @db.Timestamptz` |
-| `enum` | `text` with a `check`, unless the field allows other values | `String`, or a Prisma `enum` |
+| `dateTime` | `timestamptz`, or `date` when `includeTime` is false. Cast the exported string straight to `date`, not through `timestamptz` | `DateTime @db.Timestamptz`, or `DateTime @db.Date` |
+| `enum` | `text` with a `check`, unless `acceptUnlistedOptions` is true | `String`, or a Prisma `enum` |
 | `enum` with `acceptMultipleSelections` | `text[]` | `String[]` |
 | `json` | `jsonb` | `Json` |
-| `richText` | `text` holding the markdown | `String` |
+| `richText` | `text` holding the markdown. The export gives `{ markdown }` | `String` |
 | `vector` | `vector(n)` from pgvector, where `n` is the embedding length | `Unsupported("vector(1536)")` |
 | `file` | Columns for the storage key, file name, MIME type, and size | Four fields |
 | `encryptedString` | `text`, encrypted by your app or a key service | `String` |
 | `password` | Usually lives in your sign-in provider | |
 | `roleList` | `text[]` | `String[]` |
-| `money` | `numeric`, plus the currency code | `Decimal` |
-| `recordState` | `text` holding the state name | `String` |
-| `belongsTo` | `bigint` column | `BigInt` plus a `@relation` |
+| `belongsTo` | `bigint` column named `<field>_id` | `BigInt` plus a `@relation` |
 | `hasOne`, `hasMany` | No column. The other table holds the key | A relation field |
 | `hasManyThrough` | The join model's table, exported like any other model | Two relations through the join model |
 | `computed` | A view or a query | Nothing stored |
+| `money` (deprecated) | `bigint` for the amount and `text` for the currency. The export gives `{ amount, currency }` with a whole-number amount | `BigInt` and `String` |
+| `recordState` (deprecated), and `state` on `shopifyShop` | `text` | `String` |
 
 ## Decisions the table hides
 
-**Numbers are exact on Gadget.** Gadget stores `number` fields in a Postgres `decimal` column. In a `double precision` column, `0.1 + 0.2` is `0.30000000000000004`, so order totals drift as you sum them. Use `numeric`.
+**`user` is not a table name.** `create table user` fails with `syntax error at or near "user"`, because `user` is a reserved word in Postgres. `order` and `group` fail the same way. Name the tables `users`, `orders`, and `groups`. A namespaced model such as `billing/invoice` can become `billing_invoice`, or `invoice` in a `billing` schema.
+
+**Numbers are exact on Gadget.** Gadget stores `number` fields in a Postgres `decimal` column. In a `double precision` column, `0.1 + 0.2` is `0.30000000000000004`, so order totals drift as you sum them. Use `numeric`. In Prisma, write `Decimal @db.Decimal`: a bare `Decimal` becomes `decimal(65,30)`, which pads every value to 30 decimal places.
 
 **Gadget enforces no foreign keys.** A `belongsTo` can point at a record that no longer exists. Find those before you add a constraint, or the migration fails:
 
@@ -44,23 +48,38 @@ where widget.shop_id is not null
   and shopify_shop.id is null;
 ```
 
-**Uniqueness ignores case on Gadget.** A `unique` validation on a string compares `A@x.com` and `a@x.com` as equal unless it's case sensitive, and can be scoped to another field. A plain unique index allows both:
+Load parent tables before child tables once the constraints exist, or add the constraints after every table is loaded.
+
+**Uniqueness ignores case on Gadget.** A `unique` validation on a `string`, `email`, `url`, or `richText` field compares `A@x.com` and `a@x.com` as equal unless it sets `caseSensitive: true`, and can be scoped to another field with `scopeByField`. A plain unique index allows both:
 
 ```sql
 -- in db/migrations/widget_unique_sku.sql
 create unique index widget_sku_per_shop on widget (shop_id, lower(sku));
 ```
 
-**Required rejects empty strings on Gadget.** Use `not null` plus `check (name <> '')` for text.
+Gadget enforces uniqueness with an index of its own, so exported records never break this one. Like Gadget, the index allows any number of rows where the column is null. Prisma's `@@unique` can't express `lower()`, so keep this index in a SQL migration.
 
-**Vectors fit pgvector's index limit.** Gadget caps `vector` fields at 2,000 dimensions, the most a pgvector `vector` index supports. Gadget indexed them with HNSW and cosine distance:
+**Required rejects empty strings on Gadget.** Use `not null` plus `check (name <> '')` for text. Gadget checks `required` and the other validations only when an action saves a record, so rows written through the Internal API, or saved before you added the validation, can still be null or empty. Count them before you add the constraint:
+
+```sql
+-- in db/checks/widget_missing_names.sql
+select count(*) from widget where name is null or name = '';
+```
+
+**Record states are nested.** The `state` field on `shopifyShop` exports as `{ "created": "installed" }` or `{ "created": "uninstalled" }`, not as a string. Store the inner name, `installed` or `uninstalled`, and filter on it wherever your Gadget code filtered on `state: { equals: "created.installed" }`.
+
+**Vectors fit pgvector's index limit.** Gadget caps `vector` fields at 2,000 dimensions, the most a pgvector index on a `vector` column supports. Gadget indexed them with HNSW and cosine distance:
 
 ```sql
 -- in db/migrations/widget_embedding_index.sql
 create index widget_embedding on widget using hnsw (embedding vector_cosine_ops);
 ```
 
+Similarity queries change shape too: [other-connections.md](other-connections.md) shows how Gadget's `cosineSimilarity` becomes pgvector's `<=>` distance.
+
 **Shopify money fields are strings.** `totalPrice` on `shopifyOrder` is a `string` field on Gadget, because Shopify sends money as strings. Convert to `numeric` when you load it if you sum or compare it.
+
+**Shopify metafield fields are Shopify's data.** A field with a `shopifyMetafield` block in `schema.gadget.ts` mirrors a metafield. Give it a column, and fill it from the metafield in your backfill and webhook handlers instead of from the export ([shopify-sync.md](shopify-sync.md)).
 
 ## Computed fields
 
@@ -85,6 +104,8 @@ group by shopify_customer.id;
 
 A generated column only works when the value uses fields on the same row, since generated columns can't read other rows.
 
+Computed views, the `.gelly` files in `api/views` and the queries passed to `api.view()`, are a separate feature. The inventory script lists them, and [computed-views.md](computed-views.md) covers replacing them.
+
 ## Move sequences after loading
 
 Tables with their own id sequence start counting at 1. After loading exported records, move the sequence past the highest id, or the first new record collides with an imported one:
@@ -99,10 +120,21 @@ On an empty table this does nothing, which is fine. Tables for Shopify models us
 ## A Shopify model and a custom model in Prisma
 
 ```prisma
+// in prisma/schema.prisma
+model ShopifyShop {
+  id               BigInt   @id // Shopify's id, never generated
+  myshopifyDomain  String   @map("myshopify_domain")
+  state            String   @default("installed")
+  orders           ShopifyOrder[]
+  widgets          Widget[]
+
+  @@map("shopify_shop")
+}
+
 model ShopifyOrder {
-  id               BigInt    @id // Shopify's id, never generated
+  id               BigInt    @id
   shopId           BigInt    @map("shop_id")
-  totalPrice       Decimal   @map("total_price") @db.Decimal
+  totalPrice       Decimal?  @map("total_price") @db.Decimal
   financialStatus  String?   @map("financial_status")
   shopifyCreatedAt DateTime? @map("shopify_created_at") @db.Timestamptz
   shopifyUpdatedAt DateTime? @map("shopify_updated_at") @db.Timestamptz
@@ -114,26 +146,37 @@ model ShopifyOrder {
 }
 
 model Widget {
-  id     BigInt   @id @default(autoincrement())
-  shopId BigInt   @map("shop_id")
-  name   String
-  sku    String?
-  price  Decimal? @db.Decimal
-  tags   String[]
+  id        BigInt    @id @default(autoincrement())
+  shopId    BigInt    @map("shop_id")
+  name      String
+  sku       String?
+  price     Decimal?  @db.Decimal
+  tags      String[]
+  dueOn     DateTime? @map("due_on") @db.Date
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  shop      ShopifyShop @relation(fields: [shopId], references: [id])
 
+  @@index([shopId, id])
   @@map("widget")
 }
 ```
+
+`@updatedAt` makes Prisma set `updated_at` on every write it makes. Load exported records with SQL, as in [data-export.md](data-export.md), so they keep the `updatedAt` Gadget gave them.
 
 ## Common pitfalls
 
 - **`double precision` for numbers.** Totals drift.
 - **Generating new ids.** Every relationship breaks. Keep the exported ids.
 - **Adding foreign keys before checking for orphans.** The migration fails on records Gadget allowed.
+- **Adding `not null` before counting nulls.** Validations never checked records written through the Internal API.
 - **A case-sensitive unique index.** Allows duplicates Gadget rejected.
+- **A table named `user`.** A syntax error in Postgres. Use `users`.
 - **Forgetting `setval`.** The first insert after import fails with a duplicate key.
 
 ## Related references
 
 - [data-export.md](data-export.md): getting the records out
 - [shop-tenancy.md](shop-tenancy.md): policies for every table with a `shop_id`
+- [computed-views.md](computed-views.md): replacing computed views
+- [files-and-storage.md](files-and-storage.md): the columns and code that replace a file field

@@ -44,7 +44,7 @@ const { data } = await response.json();
 if (data.bulkOperationRunQuery.userErrors.length) throw new Error(JSON.stringify(data.bulkOperationRunQuery.userErrors));
 ```
 
-Subscribe to the `bulk_operations/finish` topic to hear when it ends, then read its `url` with `node(id:)`. Shopify says that webhook isn't guaranteed, so also poll with `bulkOperation(id:)` on API version 2026-01 and later (`currentBulkOperation` before that). The result URL expires after a week.
+Subscribe to the `bulk_operations/finish` topic to hear when it ends, then read its `url` with `bulkOperation(id:)` on API version 2026-01 and later (`currentBulkOperation` before that). Shopify says that webhook isn't guaranteed, so also poll with the same query. The result URL expires after a week, and Shopify stops an operation that runs longer than 10 days.
 
 Each line of the file is one node. Nested nodes come on their own lines after their parent, with a `__parentId`:
 
@@ -75,6 +75,7 @@ Limits to plan around:
 
 - **Concurrency:** on API version 2026-01 and later, an app can run 5 bulk queries per store at once. Earlier versions allow 1.
 - **Shape:** up to 5 connections in one query, nested at most 2 levels.
+- **IP allowlist:** from 12 November 2026 Shopify blocks bulk operations from public apps that have no IP allowlist. See [cutover.md](cutover.md).
 - **Orders older than 60 days** need the `read_all_orders` scope. Without it the backfill silently returns only recent orders.
 - **GraphQL ids:** bulk results use global ids such as `gid://shopify/Order/5123456789`. The number at the end is the id Gadget stored, so keep that.
 - **Field names:** GraphQL fields differ from Gadget's REST-shaped fields, such as `displayFinancialStatus` for `financialStatus` and `totalPriceSet` for `totalPrice`. Map each one you kept.
@@ -109,24 +110,31 @@ Some Shopify models have no webhook topic, such as `shopifyFile`. Gadget kept th
 
 ## Pace calls to each store
 
-Shopify's GraphQL Admin API gives each store 100 points per second on most plans, 200 on Advanced, 1,000 on Shopify Plus, and 2,000 on Shopify for enterprise. Gadget paced calls per store. Each response reports what's left in `extensions.cost.throttleStatus`, so wait when a query would overdraw it:
+Shopify's GraphQL Admin API gives each store 100 points per second on most plans, 200 on Advanced, 1,000 on Shopify Plus, and 2,000 on Shopify for enterprise. One query can cost at most 1,000 points. The limit is counted per app and store, and the new app is the same Shopify app as the Gadget one, so while both run they draw on one allowance for each store.
+
+Gadget paced calls per store. Each response reports what's left in `extensions.cost.throttleStatus`, so wait when the next query would overdraw it. The template's `admin.graphql` throws on a throttled response instead of returning it, so catch that too:
 
 ```typescript
 // in app/shopify/paced.server.ts
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export async function pacedGraphql(admin: { graphql: Function }, query: string, variables: object, estimatedCost = 100) {
   for (;;) {
-    const response = await admin.graphql(query, { variables });
-    const body = await response.json();
-    const status = body.extensions?.cost?.throttleStatus;
-    const throttled = body.errors?.some((error: any) => error.extensions?.code === "THROTTLED");
-    if (!throttled) {
-      if (status && status.currentlyAvailable < estimatedCost) {
-        const waitMs = ((estimatedCost - status.currentlyAvailable) / status.restoreRate) * 1000;
-        await new Promise((resolve) => setTimeout(resolve, waitMs));
-      }
-      return body;
+    let body: any;
+    try {
+      body = await (await admin.graphql(query, { variables })).json();
+    } catch (error: any) {
+      // the template throws a throttled response, with Shopify's errors on error.body.errors.graphQLErrors
+      const throttled = error?.body?.errors?.graphQLErrors?.some((item: any) => item.extensions?.code === "THROTTLED");
+      if (!throttled) throw error;
+      await sleep(1000);
+      continue;
     }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const status = body.extensions?.cost?.throttleStatus;
+    if (status && status.currentlyAvailable < estimatedCost) {
+      await sleep(((estimatedCost - status.currentlyAvailable) / status.restoreRate) * 1000);
+    }
+    return body;
   }
 }
 ```

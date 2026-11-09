@@ -1,5 +1,7 @@
 # Tests
 
+The gadget-migration tests run the skill's code and the snippets in its references, so a reference that changes in a way that breaks its code fails a test. Snippet tests find each code block by the path comment on its first line, such as `// in app/db/withShop.server.ts`.
+
 ## Unit tests
 
 No dependencies, Node 22.18+ or 23.6+:
@@ -8,17 +10,56 @@ No dependencies, Node 22.18+ or 23.6+:
 node --test "tests/**/*.test.ts"
 ```
 
-- `gadget-migration/shopify-signatures.test.ts` checks `assets/shopify-signatures.ts` against Shopify's published examples (the OAuth callback and both app proxy examples, signed with the secret `hush`) and against forged, reordered, and re-split requests.
-- `gadget-migration/inventory.test.ts` runs `scripts/inventory.ts` on the sample app in `gadget-migration/fixtures/sample-app`.
+- `gadget-migration/shopify-signatures.test.ts`: `assets/shopify-signatures.ts` against Shopify's published examples (the OAuth callback and both app proxy examples, signed with the secret `hush`) and against forged, reordered, re-split, and stale requests.
+- `gadget-migration/shopify-tokens.test.ts`: the token refresh and exchange code in `references/shopify-tokens.md`, against a local stand-in for Shopify's token endpoint.
+- `gadget-migration/inventory.test.ts`: `scripts/inventory.ts` on the sample app in `gadget-migration/fixtures/sample-app`.
+- `gadget-migration/data-export.test.ts`: the export script in `references/data-export.md`, against the fake client in `fixtures/fake-gadget-client`, including failed requests and restarts.
+- `gadget-migration/coverage-*.test.ts`: the BigCommerce verifier in `assets/bigcommerce-signed-payload.ts` and the API key code in `references/external-api-clients.md`.
 
 ## Integration tests
 
-These run the SQL and TypeScript snippets from the gadget-migration references against Postgres and Redis. They read each snippet from the reference file by the path comment on its first line, so a test fails if a reference changes in a way that breaks its code.
+Each folder has its own `package.json`. Run `npm install` once in each.
+
+Postgres and Redis, from `gadget-migration/integration`. `DATABASE_URL` must be a superuser, because the tests create scratch databases and the `app_user` and `storefront_user` roles. Without `REDIS_URL` the BullMQ tests skip, and without `PGBOUNCER_BIN` the connection pooler tests skip. `schema.integration.ts` skips its vector test when pgvector isn't installed.
 
 ```bash
 cd tests/gadget-migration/integration
-npm install
-DATABASE_URL=postgres://postgres@127.0.0.1:5432/postgres REDIS_URL=redis://127.0.0.1:6379 npm test
+DATABASE_URL=postgres://postgres@127.0.0.1:5432/postgres REDIS_URL=redis://127.0.0.1:6379 PGBOUNCER_BIN=$(which pgbouncer) npm test
 ```
 
-`DATABASE_URL` must be a superuser, because the tests create a scratch database and an `app_user` role. Without `REDIS_URL`, the BullMQ tests are skipped.
+`PGBOUNCER_PORT` changes the pooler's port (default 64352).
+
+Shopify's app library, from `gadget-migration/shopify-template`, against a local stand-in for Shopify:
+
+```bash
+cd tests/gadget-migration/shopify-template
+npm test
+```
+
+Password imports through bcryptjs and Better Auth, from `gadget-migration/auth`:
+
+```bash
+cd tests/gadget-migration/auth
+npm test
+```
+
+The webhook subscription cleanup script in `references/cutover.md`, from `gadget-migration/cutover`. One test validates its GraphQL against Shopify's public Admin API schema and skips without network access:
+
+```bash
+cd tests/gadget-migration/cutover
+npm test
+```
+
+Search, live updates, computed views, user tenancy, and pgvector, from `gadget-migration/coverage-postgres`:
+
+```bash
+cd tests/gadget-migration/coverage-postgres
+DATABASE_URL=postgres://postgres@127.0.0.1:5432/postgres npm test
+```
+
+Presigned uploads and downloads with the AWS SDK, offline, from `gadget-migration/coverage-files`:
+
+```bash
+cd tests/gadget-migration/coverage-files
+npm test
+```

@@ -1,0 +1,12 @@
+{
+  "name": "gadget-migration-coverage-files-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-timeout=60000 \"*.integration.ts\""
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1165.0",
+    "@aws-sdk/s3-request-presigner": "3.1165.0"
+  }
+}

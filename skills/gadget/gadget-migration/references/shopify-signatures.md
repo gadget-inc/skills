@@ -9,7 +9,7 @@ All four checks are HMAC-SHA256 with your app's **client secret** (the "API secr
 | Request | Where the signature is | What is signed | Digest |
 |---|---|---|---|
 | Webhook (HTTPS delivery) | `X-Shopify-Hmac-SHA256` header | The raw request body bytes | base64 |
-| OAuth callback, links Shopify opens in your app | `hmac` query parameter | Other parameters, decoded, sorted by key, joined `key=value` with `&` | hex |
+| OAuth callback, links Shopify opens in your app | `hmac` query parameter | Other parameters, decoded, with `&` and `%` escaped, sorted as whole `key=value` pairs, joined with `&` | hex |
 | App proxy request | `signature` query parameter | Other parameters, decoded, repeated keys joined with `,`, sorted `key=value`, joined with nothing | hex |
 | Session token (ID token) from App Bridge | Third segment of the JWT | `header.payload` (HS256) | base64url |
 
@@ -21,11 +21,13 @@ The only code that changes between platforms is how you get the raw body and the
 
 If the new app uses Shopify's React Router app template, the template already does these checks:
 
-- `authenticate.webhook(request)` verifies webhook HMACs.
+- `authenticate.webhook(request)` verifies webhook HMACs. It answers 401 to a bad HMAC and 400 to a delivery missing a required header.
 - `authenticate.admin(request)` verifies session tokens.
-- `authenticate.public.appProxy(request)` verifies app proxy signatures.
+- `authenticate.public.appProxy(request)` verifies app proxy signatures, and answers 400 to a bad one.
 
 Use the file in this skill for routes the template doesn't cover, or when the app runs on another framework.
+
+The file was run against `@shopify/shopify-app-react-router` 4.0.2 on the same requests. The two agree on webhooks, on Shopify's documented OAuth callback and app proxy examples, and on session tokens. They differ in three places, each on purpose. The file accepts a query value with a space the way Shopify signs it, where the library's check rejects it. The file rejects a session token whose `iss` and `dest` name different stores. And the file rejects app proxy requests that could be read two ways, described below.
 
 ## Webhooks
 
@@ -115,7 +117,7 @@ The Express, Fastify, and Hono versions above were run against real servers with
 
 ### Pub/Sub and EventBridge deliveries
 
-Shopify only signs HTTPS deliveries. Webhooks delivered to Google Cloud Pub/Sub or Amazon EventBridge carry no HMAC, and the cloud provider's permissions are the check: only Shopify's service account can publish to the topic you granted it. Don't call `verifyWebhook` on those messages.
+Shopify only signs HTTPS deliveries. Webhooks delivered to Google Cloud Pub/Sub or Amazon EventBridge carry no HMAC, and the cloud provider's permissions are the check. For Pub/Sub, grant the **Pub/Sub Publisher** role on the topic to `delivery@shopify-pubsub-webhooks.iam.gserviceaccount.com`, and to no other principal you wouldn't trust to send you an order. Don't call `verifyWebhook` on those messages.
 
 ### Webhook headers you'll use
 
@@ -126,6 +128,7 @@ Shopify only signs HTTPS deliveries. Webhooks delivered to Google Cloud Pub/Sub 
 | `X-Shopify-Shop-Domain` | Which store sent it, such as `example.myshopify.com` |
 | `X-Shopify-Webhook-Id` | One delivery. Shopify resends the same id when it retries, so use it to drop duplicates |
 | `X-Shopify-Event-Id` | The merchant action behind it. Two subscriptions to the same topic get different webhook ids but the same event id |
+| `X-Shopify-Triggered-At` | When Shopify triggered the delivery. Shopify suggests it, or the payload's `updated_at`, for putting deliveries in order |
 | `X-Shopify-API-Version` | The payload's API version |
 
 See [shopify-webhooks.md](shopify-webhooks.md) for what to do after the check passes.
@@ -148,7 +151,9 @@ Check `shop` against the anchored pattern before you send the authorization code
 
 The function also rejects a `timestamp` more than 90 seconds from now, the same tolerance Shopify's own library uses, so a leaked URL stops working within two minutes. Pass `{ maxAgeSeconds }` to change it.
 
-Shopify signs the decoded values. A space travels as `%20` or `+` but is signed as a space, and `URLSearchParams` decodes both, so pass it the query as received. Repeated keys, such as `ids[]=1&ids[]=2` on an admin bulk action link, are signed once with their values joined by commas. That follows Shopify's own library and wasn't checked against a link signed by Shopify.
+Shopify signs the decoded values. A space travels as `%20` or `+` but is signed as a space, and `URLSearchParams` decodes both, so pass it the query as received. Before signing, Shopify escapes `&` and `%` in values as `%26` and `%25`, and `=` in keys as `%3D`, so `q=50%25+off` on the wire is signed as `q=50%25 off`. It sorts whole `key=value` pairs, not keys, so `q2=x` comes before `q=y`.
+
+An array, such as `ids[]=1&ids[]=2` on an admin bulk action link, is signed once as `ids=["1", "2"]`, with a comma and a space between values. That is the format Gadget's own verifier accepted for bulk action links. The function rejects a key that repeats without `[]`, and a single value that starts with `[`, because both could be read two ways.
 
 ### ❌ Don't verify embedded app loads with the query `hmac`
 
@@ -168,7 +173,11 @@ const customerId = url.searchParams.get("logged_in_customer_id"); // empty strin
 
 A valid signature proves Shopify forwarded the request. It doesn't prove the customer may see the record they asked for. Check that `logged_in_customer_id` owns the data before returning it.
 
-Shopify joins the signed `key=value` pairs with nothing between them, so one signed string can be split into parameters more than one way. For example, Shopify's documented request verifies just as well with `shop` and `timestamp` folded into the value of `logged_in_customer_id`. So after checking the signature, the function also requires `shop` to be a `*.myshopify.com` domain, `logged_in_customer_id` to be digits or empty, `timestamp` to be within 90 seconds of now, and none of them to repeat. Read those three values only after it returns `true`.
+Shopify joins the signed `key=value` pairs with nothing between them, so one signed string can be split into parameters more than one way. For example, a visitor logged in as customer 5 requests `/apps/reviews?extra=1&m=xlogged_in_customer_id%3D7`. Shopify signs `extra=1logged_in_customer_id=5m=xlogged_in_customer_id=7...`. The parameters `extra=1logged_in_customer_id=5m=x` and `logged_in_customer_id=7` sign to the same string, so anyone who sees that signed URL can replay it as customer 7. A check that only compares the signature accepts it.
+
+So the function also requires `shop` to be a `*.myshopify.com` domain, `logged_in_customer_id` to be digits or empty, `timestamp` to be within 90 seconds of now, none of them to repeat, and the text `shop=` and `logged_in_customer_id=` to appear in the signed string exactly once each. Read those three values only after it returns `true`.
+
+The last rule has a cost: a request with another parameter whose name ends in `shop`, such as `workshop=1`, or whose value contains `shop=`, is refused. Rename such parameters in your storefront code.
 
 Shopify adds `shop`, `logged_in_customer_id`, `path_prefix`, `timestamp`, and `signature`, and says it may add more parameters later. The function signs whatever arrives, so new parameters don't break it.
 
@@ -188,7 +197,7 @@ if (!session) return new Response(null, { status: 401 });
 // session.shop is "example.myshopify.com"; scope every query to it
 ```
 
-The function checks the signature and that `alg` is `HS256`, that `exp` is in the future and `nbf` in the past, that `aud` is your client id, and that `iss` and `dest` name the same `*.myshopify.com` store. It allows 5 seconds of clock skew. Shopify documents no allowance, so that number is a choice: change `leewaySeconds` if you want another.
+The function checks the signature and that `alg` is `HS256`, that `exp` is in the future and `nbf` in the past, that `aud` is your client id, and that `iss` and `dest` name the same `*.myshopify.com` store. It allows 10 seconds of clock skew, the same as Shopify's own library. Shopify documents no allowance, so change `leewaySeconds` if you want another.
 
 ## Rotating the client secret
 

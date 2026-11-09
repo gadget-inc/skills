@@ -10,7 +10,7 @@ On Gadget, a webhook turned into a model action run and nothing else. Behind tha
 4. **Ignore stale payloads.** Shopify doesn't deliver in order. Gadget skipped a payload whose `updated_at` was older than the stored `shopifyUpdatedAt`.
 5. **Keep child records in step.** When an order's line items changed, Gadget deleted stored line items that were missing from the new payload.
 
-Here is what happens without them. Shopify needs a response within 5 seconds and retries a failed delivery up to 8 times over 4 hours. A handler that takes 6 seconds to write an order processes it twice. An `orders/updated` for a change at 10:00:05 can arrive before the one for 10:00:02. A handler that writes whatever arrives last ends with the older data.
+Here is what happens without them. Shopify needs a response within 5 seconds, counts anything outside the 200 range as a failure, including a redirect, and retries a failed delivery up to 8 times over 4 hours. A handler that takes 6 seconds to write an order processes it twice. An `orders/updated` for a change at 10:00:05 can arrive before the one for 10:00:02. A handler that writes whatever arrives last ends with the older data.
 
 ## Respond within 5 seconds
 
@@ -40,9 +40,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 ```
 
+`authenticate.webhook` does one more thing: it loads the store's offline session and, when the access token has less than 5 minutes left, refreshes it before returning. If that refresh fails, it answers 500, although the HMAC was valid. So a store whose refresh token was retired during the move fails every webhook until its merchant opens the app, and Shopify drops each one after 8 retries. Your reconciliation is what recovers those. If webhook intake must not depend on token state, verify with `verifyWebhook` in that route instead.
+
 Without the template, verify with `verifyWebhook` from [shopify-signatures.md](shopify-signatures.md) and read `X-Shopify-Webhook-Id`, `X-Shopify-Topic`, and `X-Shopify-Shop-Domain` from the headers.
 
-If the app has no queue, Shopify can deliver to Google Cloud Pub/Sub or Amazon EventBridge instead: set the subscription's `uri` in `shopify.app.toml` to `pubsub://<project-id>:<topic-id>` or an EventBridge event source ARN. That removes the 5-second limit from your servers. These deliveries carry no HMAC.
+If the app has no queue, Shopify can deliver to Google Cloud Pub/Sub or Amazon EventBridge instead: set the subscription's `uri` in `shopify.app.toml` to `pubsub://<project-id>:<topic-id>` or an EventBridge event source ARN. That removes the 5-second limit from your servers. These deliveries carry no HMAC, and Pub/Sub can deliver a message more than once, so the duplicate check below still applies.
 
 ## Drop duplicate deliveries
 
@@ -136,7 +138,9 @@ if (changed) await jobs.add("orderPaid", { orderId }, { jobId: `order-paid-${ord
 
 This also stops echo loops, where your app writes to Shopify, Shopify sends the change back as a webhook, and the handler writes to Shopify again.
 
-If the Gadget app narrowed webhooks with `includeFields`, keep the same `include_fields` on the new subscriptions, and keep `updated_at` in each list so the stale check has a value to compare. Shopify still sends a webhook when a field outside the list changes, and it may skip deliveries whose narrowed payload is identical to the last one.
+If the Gadget app narrowed webhooks with `includeFields`, keep the same `include_fields` on the new subscriptions. `include_fields` narrows the payload. It doesn't stop deliveries: Shopify still sends a webhook when a field outside the list changes. The one exception is that Shopify drops a delivery whose narrowed payload is identical to another within a short window.
+
+Whether to list `updated_at` is a trade. With it, the stale check has a value to compare, and no two payloads are identical, so every change arrives, including the echo of your app's own writes. Without it, Shopify drops many of those echoes, but the upsert above has no timestamp to compare, so compare fields instead, as the reconciliation upsert does.
 
 ## Topics Gadget handled for you
 
@@ -149,11 +153,16 @@ If the Gadget app narrowed webhooks with `includeFields`, keep the same `include
 
 The inventory script lists the topics in `shopify.app.toml`. Apps on framework versions before 1.7 had per-store subscriptions instead; the topics are in each model action's trigger and in the Shopify connection settings.
 
-`shop/redact` arrives after the store uninstalls the app, so its handler must work without a session or an access token. The template's `authenticate.webhook` returns `session` as undefined in that case.
+`shop/redact` arrives 48 hours after the store uninstalls the app, so its handler must work without a session or an access token. The template's `authenticate.webhook` returns `session` as undefined when it has no session for the store, and the template's own `app/uninstalled` handler deletes the store's sessions. Shopify requires a 401 for a compliance webhook with a bad HMAC, which `authenticate.webhook` and the pattern in [shopify-signatures.md](shopify-signatures.md) both give.
+
+Subscriptions come in two kinds, and they fail differently. Shopify never deletes a failing subscription from `shopify.app.toml`. It deletes a per-store subscription, created through the Admin API, after 8 failed deliveries in a row. Gadget created per-store subscriptions for apps on framework versions before 1.7 and for metafield models, and [cutover.md](cutover.md) covers deleting them. Gadget registers them again when it sees the store reinstall or its scopes change, so check for them once more before you delete the Gadget app.
+
+Gadget uses per-store subscriptions for models with metafield fields because subscriptions in `shopify.app.toml` can't ask for metafields. If a model you're moving has metafield fields, either create per-store subscriptions through the Admin API with `metafieldNamespaces` or `metafields`, or read the metafields from the Admin API after each webhook.
 
 ## Common pitfalls
 
 - **Doing the work before responding.** Anything slower than 5 seconds is processed twice.
+- **A redirect on the webhook URL.** A trailing-slash or `www` redirect counts as a failed delivery. Give Shopify the final URL.
 - **Recording the webhook id outside the write's transaction.** A failed job then marks a webhook processed that never was.
 - **Checking `updated_at` in a separate `select`.** Two workers can both pass the check and the older one can write last. Put the check in the `where` of the upsert.
 - **Pruning children from a narrowed payload.** Deletes every line item when `line_items` isn't in `include_fields`.

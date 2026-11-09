@@ -44,9 +44,9 @@ export interface QueryOptions {
  * in your app, such as admin bulk actions. For embedded app loads, verify the `id_token` with
  * verifySessionToken instead.
  *
- * Shopify signs the decoded values, which makes some query strings ambiguous: a value
- * containing `&` signs the same as two separate parameters. This function rejects those
- * instead of guessing.
+ * Shopify signs the decoded values with `&` and `%` escaped (and `=` in keys), as whole
+ * `key=value` pairs sorted and joined with `&`. The escaping keeps a value containing `&` from
+ * signing the same as two separate parameters.
  */
 export async function verifyQueryHmac(query: string | URLSearchParams, secrets: Secrets, options: QueryOptions = {}): Promise<boolean> {
   const params = typeof query === "string" ? new URLSearchParams(query) : query;
@@ -54,21 +54,34 @@ export async function verifyQueryHmac(query: string | URLSearchParams, secrets: 
   if (!hmac || !/^[0-9a-f]{64}$/i.test(hmac) || params.getAll("hmac").length > 1) return false;
   if (!isFresh(params, options)) return false;
 
-  // repeated keys, such as ids[]=1&ids[]=2 on a bulk action link, are signed once with their values
-  // joined by commas, the way Shopify's own library rebuilds them
-  const grouped = new Map<string, string[]>();
+  const scalars = new Map<string, string>();
+  const arrays = new Map<string, string[]>();
   for (const [key, value] of params) {
     if (key === "hmac" || key === "signature") continue;
-    if (/[&=]/.test(key) || value.includes("&")) return false;
-    grouped.set(key, [...(grouped.get(key) ?? []), value]);
+    if (key.endsWith("[]")) {
+      const name = key.slice(0, -2);
+      arrays.set(name, [...(arrays.get(name) ?? []), value]);
+      continue;
+    }
+    // a repeated key, or a single value shaped like an array, could be read two ways
+    if (scalars.has(key) || value.startsWith("[")) return false;
+    scalars.set(key, value);
   }
-  // sorted by key, then joined key=value with "&"
-  const message = [...grouped]
-    .sort(([a], [b]) => compareCodeUnits(a, b))
-    .map(([key, values]) => `${key}=${values.join(",")}`)
-    .join("&");
+  for (const name of arrays.keys()) if (scalars.has(name)) return false;
+
+  const pairs = [...scalars].map(([key, value]) => `${escapeQueryPart(key, /[&=%]/g)}=${escapeQueryPart(value, /[&%]/g)}`);
+  // an array, such as ids[]=1&ids[]=2 on a bulk action link, is signed once as ids=["1", "2"]
+  for (const [name, values] of arrays) {
+    const formatted = `[${values.map((value) => JSON.stringify(value)).join(", ")}]`;
+    pairs.push(`${escapeQueryPart(name, /[&=%]/g)}=${escapeQueryPart(formatted, /[&%]/g)}`);
+  }
+  const message = pairs.sort(compareCodeUnits).join("&");
 
   return verifyHmac(secrets, hexToBytes(hmac), encoder.encode(message));
+}
+
+function escapeQueryPart(text: string, characters: RegExp): string {
+  return text.replace(characters, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 
 /**
@@ -99,6 +112,13 @@ export async function verifyAppProxySignature(query: string | URLSearchParams, s
   }
   // Shopify's documented example sorts the whole key=value strings and joins them with nothing
   const message = [...grouped].map(([key, values]) => `${key}=${values.join(",")}`).sort(compareCodeUnits).join("");
+
+  // With no separator, a caller who has one signed URL can fold Shopify's own `shop=` or
+  // `logged_in_customer_id=` pair into a neighbouring parameter and present a second one as real.
+  // That always leaves the name in the signed string twice, so require it exactly once.
+  for (const key of ["shop", "logged_in_customer_id"]) {
+    if (message.split(`${key}=`).length - 1 !== (params.has(key) ? 1 : 0)) return false;
+  }
 
   return verifyHmac(secrets, hexToBytes(signature), encoder.encode(message));
 }
@@ -151,9 +171,9 @@ export async function verifySessionToken(
   const payload = parseJsonSegment(encodedPayload) as SessionTokenPayload | null;
   if (!payload) return null;
 
-  // Shopify documents no clock skew allowance; a few seconds absorbs small drift between servers
+  // Shopify documents no clock skew allowance; 10 seconds is what Shopify's own library allows
   const now = options.nowSeconds ?? Math.floor(Date.now() / 1000);
-  const leeway = options.leewaySeconds ?? 5;
+  const leeway = options.leewaySeconds ?? 10;
   if (typeof payload.exp !== "number" || payload.exp <= now - leeway) return null;
   if (typeof payload.nbf !== "number" || payload.nbf > now + leeway) return null;
   if (payload.aud !== options.clientId) return null;

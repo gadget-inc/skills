@@ -91,16 +91,24 @@ describe("verifyQueryHmac", () => {
     assert.equal(await verifyQueryHmac(query, SECRET, at), true);
   });
 
-  it("signs repeated keys once, with their values joined by commas", async () => {
+  it("signs an array once, in the form ids=[\"1\", \"2\"]", async () => {
     // an admin bulk action link for two selected records
-    const hmac = sign(`ids[]=1,2&shop=example.myshopify.com&timestamp=${now}`);
+    const hmac = sign(`ids=["1", "2"]&shop=example.myshopify.com&timestamp=${now}`);
     assert.equal(await verifyQueryHmac(`ids[]=1&ids[]=2&shop=example.myshopify.com&timestamp=${now}&hmac=${hmac}`, SECRET, at), true);
+    // one parameter holding the same text is not the same request
+    const asScalar = `ids=${encodeURIComponent('["1", "2"]')}&shop=example.myshopify.com&timestamp=${now}&hmac=${hmac}`;
+    assert.equal(await verifyQueryHmac(asScalar, SECRET, at), false);
   });
 
-  it("sorts by key, not by the key=value string", async () => {
-    // "a" sorts before "a-", but "a-=" sorts before "a=" because "-" is below "="
-    const hmac = sign(`a=1&a-=2&timestamp=${now}`);
-    assert.equal(await verifyQueryHmac(`a-=2&a=1&timestamp=${now}&hmac=${hmac}`, SECRET, at), true);
+  it("sorts whole key=value pairs, not keys", async () => {
+    // as keys, "q" sorts before "q2". As pairs, "q2=x" sorts before "q=y" because "2" is below "="
+    const hmac = sign(`q2=x&q=y&timestamp=${now}`);
+    assert.equal(await verifyQueryHmac(`q=y&q2=x&timestamp=${now}&hmac=${hmac}`, SECRET, at), true);
+  });
+
+  it("escapes % and & in values before signing", async () => {
+    const hmac = sign(`q=50%25 off %26 more&timestamp=${now}`);
+    assert.equal(await verifyQueryHmac(`q=50%25+off+%26+more&timestamp=${now}&hmac=${hmac}`, SECRET, at), true);
   });
 
   it("leaves a legacy signature parameter out of the signed string", async () => {
@@ -108,11 +116,17 @@ describe("verifyQueryHmac", () => {
     assert.equal(await verifyQueryHmac(`shop=example.myshopify.com&timestamp=${now}&signature=abc&hmac=${hmac}`, SECRET, at), true);
   });
 
-  it("rejects a query whose values could be re-split", async () => {
-    // Shopify signed one parameter, note="safe&admin=true". Sent as two parameters, the signed
-    // string is the same, so a verifier that accepts it lets a caller add admin=true.
-    const signedAsOne = sign(`note=safe&admin=true&shop=example.myshopify.com&timestamp=${now}`);
-    assert.equal(await verifyQueryHmac(`note=safe%26admin%3Dtrue&shop=example.myshopify.com&timestamp=${now}&hmac=${signedAsOne}`, SECRET, at), false);
+  it("rejects a query whose values were re-split", async () => {
+    // Shopify signed one parameter, note="safe&admin=true", with the & escaped
+    const signedAsOne = sign(`note=safe%26admin=true&shop=example.myshopify.com&timestamp=${now}`);
+    assert.equal(await verifyQueryHmac(`note=safe%26admin%3Dtrue&shop=example.myshopify.com&timestamp=${now}&hmac=${signedAsOne}`, SECRET, at), true);
+    // sent as two parameters, it would let a caller add admin=true
+    assert.equal(await verifyQueryHmac(`note=safe&admin=true&shop=example.myshopify.com&timestamp=${now}&hmac=${signedAsOne}`, SECRET, at), false);
+  });
+
+  it("rejects a repeated key that is not an array", async () => {
+    const hmac = sign(`a=1&shop=example.myshopify.com&timestamp=${now}`);
+    assert.equal(await verifyQueryHmac(`a=1&a=1&shop=example.myshopify.com&timestamp=${now}&hmac=${hmac}`, SECRET, at), false);
   });
 
   it("rejects a missing hmac or timestamp", async () => {
@@ -150,6 +164,36 @@ describe("verifyAppProxySignature", () => {
     assert.equal(await verifyAppProxySignature(resplit, SECRET, at), false);
   });
 
+  it("rejects a customer id moved in from another parameter", async () => {
+    // A visitor logged in as customer 5 requests /apps/awesome_reviews?extra=1&m=xlogged_in_customer_id%3D7.
+    // Shopify signs these five pairs. If the visitor ever sees that signed URL, the same string
+    // re-splits into a request from customer 7.
+    const signed = sign(
+      "extra=1" + "logged_in_customer_id=5" + "m=xlogged_in_customer_id=7" + "path_prefix=/apps/awesome_reviews" + "shop=shop-name.myshopify.com" + "timestamp=1317327555"
+    );
+    const genuine = `extra=1&m=xlogged_in_customer_id%3D7&shop=shop-name.myshopify.com&logged_in_customer_id=5&path_prefix=%2Fapps%2Fawesome_reviews&timestamp=1317327555&signature=${signed}`;
+    const forged = `extra=${encodeURIComponent("1logged_in_customer_id=5m=x")}&logged_in_customer_id=7&path_prefix=%2Fapps%2Fawesome_reviews&shop=shop-name.myshopify.com&timestamp=1317327555&signature=${signed}`;
+    assert.equal(await verifyAppProxySignature(forged, SECRET, at), false);
+    // the request Shopify really sent is refused too, because it can't be told apart from the forgery
+    assert.equal(await verifyAppProxySignature(genuine, SECRET, at), false);
+  });
+
+  it("rejects a shop moved in from another parameter", async () => {
+    // signed for shop-name.myshopify.com, with pz=1q and si=wshop=victim.myshopify.com added by the caller
+    const signed = sign(
+      "logged_in_customer_id=" + "path_prefix=/apps/x" + "pz=1q" + "shop=shop-name.myshopify.com" + "si=wshop=victim.myshopify.com" + "timestamp=1317327555"
+    );
+    const forged = `logged_in_customer_id=&path_prefix=%2Fapps%2Fx&pz=1&qshop=${encodeURIComponent("shop-name.myshopify.comsi=w")}&shop=victim.myshopify.com&timestamp=1317327555&signature=${signed}`;
+    assert.equal(await verifyAppProxySignature(forged, SECRET, at), false);
+  });
+
+  it("accepts ordinary extra parameters, and refuses one whose name ends in shop", async () => {
+    const base = "logged_in_customer_id=1" + "path_prefix=/apps/awesome_reviews" + "shop=shop-name.myshopify.com" + "timestamp=1317327555";
+    const query = "shop=shop-name.myshopify.com&logged_in_customer_id=1&path_prefix=%2Fapps%2Fawesome_reviews&timestamp=1317327555";
+    assert.equal(await verifyAppProxySignature(`id=42&page=2&${query}&signature=${sign("id=42" + base.replace("path_prefix", "page=2path_prefix"))}`, SECRET, at), true);
+    assert.equal(await verifyAppProxySignature(`${query}&workshop=1&signature=${sign(base + "workshop=1")}`, SECRET, at), false);
+  });
+
   it("rejects a key containing '='", async () => {
     const signature = sign("a=b=clogged_in_customer_id=shop=shop-name.myshopify.comtimestamp=1317327555");
     assert.equal(await verifyAppProxySignature(`a%3Db=c&logged_in_customer_id=&shop=shop-name.myshopify.com&timestamp=1317327555&signature=${signature}`, SECRET, at), false);
@@ -182,10 +226,10 @@ describe("verifySessionToken", () => {
     assert.equal(result?.payload.sub, "42");
   });
 
-  it("rejects expired and not-yet-valid tokens, allowing 5 seconds of clock skew", async () => {
-    const expired = jwt({ ...basePayload, exp: now - 6 });
+  it("rejects expired and not-yet-valid tokens, allowing 10 seconds of clock skew", async () => {
+    const expired = jwt({ ...basePayload, exp: now - 11 });
     assert.equal(await verifySessionToken(expired, { clientId, secrets: SECRET, nowSeconds: now }), null);
-    const barelyExpired = jwt({ ...basePayload, exp: now - 4 });
+    const barelyExpired = jwt({ ...basePayload, exp: now - 9 });
     assert.notEqual(await verifySessionToken(barelyExpired, { clientId, secrets: SECRET, nowSeconds: now }), null);
     const early = jwt({ ...basePayload, nbf: now + 30 });
     assert.equal(await verifySessionToken(early, { clientId, secrets: SECRET, nowSeconds: now }), null);

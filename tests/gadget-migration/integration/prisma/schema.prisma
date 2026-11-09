@@ -1,4 +1,4 @@
-// Only the tables the Prisma snippets in references/shop-tenancy.md touch.
+// Only the tables the Prisma snippets in references/shop-tenancy.md touch. tenancy.integration.ts creates them.
 generator client {
   provider = "prisma-client-js"
 }
@@ -12,6 +12,7 @@ model AuditLog {
   id        BigInt   @id @default(autoincrement())
   shopId    BigInt   @map("shop_id")
   event     String
+  orderId   BigInt?  @map("order_id")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@map("audit_log")

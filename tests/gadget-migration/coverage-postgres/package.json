@@ -1,0 +1,11 @@
+{
+  "name": "gadget-migration-coverage-postgres-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-timeout=60000 \"*.integration.ts\""
+  },
+  "dependencies": {
+    "pg": "8.23.1"
+  }
+}
