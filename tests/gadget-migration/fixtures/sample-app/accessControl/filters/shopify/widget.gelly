@@ -1,0 +1,3 @@
+filter ($session: Session) on Widget [
+  where shopId == $session.shopId
+]

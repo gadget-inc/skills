@@ -1,0 +1,18 @@
+// Only the tables the Prisma snippets in references/shop-tenancy.md touch.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("APP_DATABASE_URL")
+}
+
+model AuditLog {
+  id        BigInt   @id @default(autoincrement())
+  shopId    BigInt   @map("shop_id")
+  event     String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("audit_log")
+}
