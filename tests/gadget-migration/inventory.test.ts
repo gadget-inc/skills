@@ -72,6 +72,21 @@ describe("inventory.ts on the sample app", () => {
     assert.match(output, /`actions\/pruneAuditLogs` \| not callable from the API; scheduled; timeoutMS 900000; calls Shopify \|/);
   });
 
+  it("reports webhook filters from the TOML and from action triggers", () => {
+    // framework 1.7 and later keep a filter on the subscription in shopify.app.toml
+    assert.match(output, /- Webhook filter `financial_status:paid`: keep it on the new subscription/);
+    // earlier versions, and models with metafield fields, keep it in the action's trigger. Quotes inside the filter survive
+    assert.match(output, /`models\/shopifyProduct\/actions\/update`: `products\/update` \(shopifyFilter `vendor:"Nike Air" AND variants\.price:>=10\.00`: set it as the subscription's `filter`\)/);
+    assert.match(output, /`models\/shopifyProduct\/actions\/update` \| not callable from the API; webhooks: products\/update; filters webhooks with shopifyFilter; shop tenancy check \|/);
+    // an action without a filter gets no note
+    assert.doesNotMatch(output, /shopifyOrder\/actions\/create`[^\n]*shopifyFilter/);
+  });
+
+  it("says where the Shopify API version and the belongsTo indexes go", () => {
+    assert.match(output, /Shopify API version: `2026-04`\. Set the new app's `apiVersion` and the `\[webhooks\]` `api_version`/);
+    assert.match(output, /### Relationships \([^\n]*index each of these columns/);
+  });
+
   it("maps route files to paths", () => {
     assert.match(output, /`GET \/` from `api\/routes\/GET\.ts`/);
     assert.match(output, /`GET \/products\/:id` from `api\/routes\/products\/GET-\[id\]\.ts`/);

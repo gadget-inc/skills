@@ -50,6 +50,22 @@ where widget.shop_id is not null
 
 Load parent tables before child tables once the constraints exist, or add the constraints after every table is loaded.
 
+**Gadget indexed what Postgres doesn't.** Gadget kept an index on every `belongsTo` field, and on every other field with filtering and sorting on, which is every field unless `filterIndex: false` turned it off (framework 1.5 and later). Postgres indexes primary keys and unique constraints only. A foreign key doesn't create an index on its own column, so this page of a store's orders reads every store's rows:
+
+```sql
+-- in app/sql/latest_orders.sql
+select id, total_price from shopify_order where shop_id = $1 order by shopify_created_at desc limit 50;
+```
+
+On 20,000 orders across 200 stores, `explain` shows `Seq Scan on shopify_order`, and it gets slower as every store adds orders. Index each `belongsTo` column, and put the columns a query filters and sorts by in one index:
+
+```sql
+-- in db/migrations/shopify_order_shop_created_index.sql
+create index shopify_order_shop_id_shopify_created_at_idx on shopify_order (shop_id, shopify_created_at desc);
+```
+
+The same `explain` then shows `Index Scan using shopify_order_shop_id_shopify_created_at_idx`. Build indexes after the import, which is faster than updating them on every inserted row. On a table that already serves traffic, use `create index concurrently` ([environments.md](environments.md)). The inventory script lists every `belongsTo` field under Relationships.
+
 **Uniqueness ignores case on Gadget.** A `unique` validation on a `string`, `email`, `url`, or `richText` field compares `A@x.com` and `a@x.com` as equal unless it sets `caseSensitive: true`, and can be scoped to another field with `scopeByField`. A plain unique index allows both:
 
 ```sql
@@ -169,6 +185,7 @@ model Widget {
 - **`double precision` for numbers.** Totals drift.
 - **Generating new ids.** Every relationship breaks. Keep the exported ids.
 - **Adding foreign keys before checking for orphans.** The migration fails on records Gadget allowed.
+- **No index on `shop_id`.** Every store-scoped query reads the whole table, and nothing fails until the table grows.
 - **Adding `not null` before counting nulls.** Validations never checked records written through the Internal API.
 - **A case-sensitive unique index.** Allows duplicates Gadget rejected.
 - **A table named `user`.** A syntax error in Postgres. Use `users`.

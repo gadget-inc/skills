@@ -630,6 +630,53 @@ describe("BullMQ options from background-jobs.md", { skip: skipWithoutRedis }, (
     );
   });
 
+  it("two environments on one Redis server share a queue until each has its own prefix (environments.md)", { timeout: 30_000 }, async () => {
+    const { Queue, Worker } = await import("bullmq");
+    const { queueOptions } = await importBlock(blocks("environments.md", "app/queueOptions.server.ts")[0]);
+    const connection = redisConnection();
+    const name = `orders-${Date.now()}`;
+    const closers: (() => Promise<unknown>)[] = [];
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 1500));
+    try {
+      // without a prefix: production queues a job, and the only worker running is staging's
+      const sharedQueue = new Queue(name, { connection });
+      const redis = await sharedQueue.client;
+      const takenByStaging: string[] = [];
+      const stagingOnDefault = new Worker(name, async (job) => void takenByStaging.push(job.data.from), { connection });
+      closers.push(() => stagingOnDefault.close(), () => sharedQueue.obliterate({ force: true }).then(() => sharedQueue.close()));
+      await sharedQueue.add("notifyExternalSystem", { from: "production" });
+      await settle();
+      assert.deepEqual(takenByStaging, ["production"]);
+      assert.ok((await redis.keys(`bull:${name}:*`)).length > 0); // the default prefix is "bull" everywhere
+      await stagingOnDefault.close();
+
+      // with the reference's options, each environment only sees its own jobs
+      const production = queueOptions(connection, "production");
+      const staging = queueOptions(connection, "staging");
+      assert.notEqual(production.prefix, staging.prefix);
+      const productionQueue = new Queue(name, production);
+      const seen: Record<string, string[]> = { production: [], staging: [] };
+      const stagingWorker = new Worker(name, async (job) => void seen.staging.push(job.data.from), staging);
+      closers.push(() => stagingWorker.close(), () => productionQueue.obliterate({ force: true }).then(() => productionQueue.close()));
+      await productionQueue.add("notifyExternalSystem", { from: "production" });
+      await settle();
+      assert.deepEqual(seen.staging, []);
+      assert.equal((await productionQueue.getJobCounts()).waiting, 1);
+
+      const productionWorker = new Worker(name, async (job) => void seen.production.push(job.data.from), production);
+      closers.push(() => productionWorker.close());
+      await settle();
+      assert.deepEqual(seen, { production: ["production"], staging: [] });
+      assert.ok((await redis.keys(`${production.prefix}:${name}:*`)).length > 0);
+      assert.equal((await redis.keys(`${staging.prefix}:${name}:*`)).filter((key) => !key.endsWith(":meta") && !key.endsWith(":stalled-check")).length, 0);
+
+      // with no environment set, it fails instead of falling back to a shared prefix
+      assert.throws(() => queueOptions(connection, undefined), /APP_ENV/);
+    } finally {
+      for (const close of closers) await close().catch(() => {});
+    }
+  });
+
   it("the per-store worker never runs more than the store's limit at once", { timeout: 30_000 }, async () => {
     const { Queue, Worker, DelayedError } = await import("bullmq");
     const { withShopSlot, ShopBusyError } = await importBlock(sql("background-jobs.md", "app/jobs/shopSlots.server.ts"));

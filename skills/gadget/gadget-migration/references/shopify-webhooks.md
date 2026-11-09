@@ -142,18 +142,61 @@ If the Gadget app narrowed webhooks with `includeFields`, keep the same `include
 
 Whether to list `updated_at` is a trade. With it, the stale check has a value to compare, and no two payloads are identical, so every change arrives, including the echo of your app's own writes. Without it, Shopify drops many of those echoes, but the upsert above has no timestamp to compare, so compare fields instead, as the reconciliation upsert does.
 
+If the Gadget app filtered webhooks with `shopifyFilter`, keep the filter too. Shopify applies it before sending, so without it the new app receives every change for the topic. On framework 1.7 and later the filter is already the `filter` of the subscription in `shopify.app.toml`, and it moves with the file. On earlier versions, and on 1.7 and later for models with metafield fields, it is `shopifyFilter` in the action's `triggers`, and the inventory script lists each one. Gadget also applied the filter to records its reconciliation found, so put the same condition in your reconciliation's query, or it writes the records the filter kept out.
+
+## Install, reinstall, and uninstall
+
+Gadget ran the `shopifyShop` `install` action once per store and `reinstall` when a store came back. The template's `hooks.afterAuth` is not an install hook, although Shopify's reference describes it as running after a merchant installs the app. It runs after every token exchange, and `authenticate.admin` exchanges a token whenever the store has no stored session or its stored access token has less than 5 minutes left.
+
+Here is what porting install code into it unchanged does. An app on 300 stores sends a welcome email from `install`. After the move, no store has a session in the new app, so the first visit from each of the 300 merchants runs `afterAuth` and sends the email again. It runs again on any later visit that finds the stored token within 5 minutes of expiry.
+
+So `afterAuth` asks your own table what happened, and one insert claims the install:
+
+```typescript
+// in app/shopify/afterAuth.server.ts
+import type { Pool } from "pg";
+
+type Admin = { graphql: (query: string) => Promise<Response> };
+type Handlers = { onInstall: (shopId: bigint) => Promise<void>; onReinstall: (shopId: bigint) => Promise<void> };
+
+// Call from hooks.afterAuth, which runs after every token exchange and not only on install.
+export async function claimInstall(pool: Pool, admin: Admin, shop: string, handlers: Handlers) {
+  // the session names the store by domain, and shopify_shop is keyed on Shopify's shop id, as on Gadget
+  const { data } = await (await admin.graphql("{ shop { id } }")).json();
+  const shopId = BigInt(data.shop.id.split("/").pop()); // gid://shopify/Shop/111222333
+
+  // two requests can exchange tokens at the same moment: only one of them inserts the row
+  const inserted = await pool.query("insert into shopify_shop (id, myshopify_domain, state) values ($1, $2, 'installed') on conflict (id) do nothing", [String(shopId), shop]);
+  if (inserted.rowCount === 1) return handlers.onInstall(shopId);
+
+  const returned = await pool.query("update shopify_shop set state = 'installed' where id = $1 and state = 'uninstalled'", [String(shopId)]);
+  if (returned.rowCount === 1) await handlers.onReinstall(shopId);
+}
+```
+
+```typescript
+// in app/shopify.server.ts, inside shopifyApp({ ... })
+hooks: {
+  afterAuth: ({ session, admin }) => claimInstall(pool, admin, session.shop, { onInstall, onReinstall }),
+},
+```
+
+Stores imported from Gadget already have a row with `state = 'installed'`, so their first visit runs neither handler. The insert commits before `onInstall` runs, so an `onInstall` that throws is not run again on the next visit. Have it queue one job and let the queue retry the work.
+
+The `uninstall` action becomes the `app/uninstalled` webhook handler. Set `state = 'uninstalled'` there, which is what makes the next `afterAuth` for that store a reinstall. The template's own handler already deletes the store's sessions.
+
 ## Topics Gadget handled for you
 
 | Gadget model action | Webhook topics |
 |---|---|
-| `shopifyShop` install, uninstall | `app/uninstalled` (install comes from your auth flow) |
+| `shopifyShop` install, reinstall, uninstall | `app/uninstalled`. Install and reinstall come from `afterAuth` (see above) |
 | `shopifyOrder` create, update, delete | `orders/create`, `orders/updated`, `orders/delete` |
 | `shopifyProduct` create, update, delete | `products/create`, `products/update`, `products/delete` |
 | `shopifyGdprRequest` create | `customers/data_request`, `customers/redact`, `shop/redact` in `compliance_topics` |
 
 The inventory script lists the topics in `shopify.app.toml`. Apps on framework versions before 1.7 had per-store subscriptions instead; the topics are in each model action's trigger and in the Shopify connection settings.
 
-`shop/redact` arrives 48 hours after the store uninstalls the app, so its handler must work without a session or an access token. The template's `authenticate.webhook` returns `session` as undefined when it has no session for the store, and the template's own `app/uninstalled` handler deletes the store's sessions. Shopify requires a 401 for a compliance webhook with a bad HMAC, which `authenticate.webhook` and the pattern in [shopify-signatures.md](shopify-signatures.md) both give.
+`shop/redact` arrives 48 hours after the store uninstalls the app, so its handler must work without a session or an access token. The template's `authenticate.webhook` returns `session` as undefined when it has no session for the store, and the template's own `app/uninstalled` handler deletes the store's sessions. Shopify requires a 401 for a compliance webhook with a bad HMAC, which `authenticate.webhook` and the pattern in [shopify-signatures.md](shopify-signatures.md) both give. When you port the `shop/redact` handler, find the tables to clear by listing every table with a `shop_id` column from `information_schema.columns`, as the policy check in [shop-tenancy.md](shop-tenancy.md) does. A list kept by hand misses the table you add next year.
 
 Subscriptions come in two kinds, and they fail differently. Shopify never deletes a failing subscription from `shopify.app.toml`. It deletes a per-store subscription, created through the Admin API, after 8 failed deliveries in a row. Gadget created per-store subscriptions for apps on framework versions before 1.7 and for metafield models, and [cutover.md](cutover.md) covers deleting them. Gadget registers them again when it sees the store reinstall or its scopes change, so check for them once more before you delete the Gadget app.
 
@@ -166,6 +209,9 @@ Gadget uses per-store subscriptions for models with metafield fields because sub
 - **Recording the webhook id outside the write's transaction.** A failed job then marks a webhook processed that never was.
 - **Checking `updated_at` in a separate `select`.** Two workers can both pass the check and the older one can write last. Put the check in the `where` of the upsert.
 - **Pruning children from a narrowed payload.** Deletes every line item when `line_items` isn't in `include_fields`.
+- **Porting install code into `afterAuth` as it is.** It runs for every existing store on its merchant's first visit after the move, and again after later token exchanges.
+- **A host that scales to zero.** Shopify waits 5 seconds. A server that takes longer than that to start fails the first webhook after every quiet period. Keep one instance running, such as with Cloud Run's minimum instances, and don't take webhooks on a free tier that stops idle services.
+- **Dropping `shopifyFilter`.** The new subscription delivers every change for the topic, not only the ones the Gadget action ran for.
 - **Parsing ids as JavaScript numbers.** Store them in `bigint` columns, and convert with `BigInt(payload.id)`. Prisma maps `bigint` to `BigInt`.
 
 ## Related references

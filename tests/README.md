@@ -12,6 +12,7 @@ node --test "tests/**/*.test.ts"
 
 - `gadget-migration/shopify-signatures.test.ts`: `assets/shopify-signatures.ts` against Shopify's published examples (the OAuth callback and both app proxy examples, signed with the secret `hush`) and against forged, reordered, re-split, and stale requests.
 - `gadget-migration/shopify-tokens.test.ts`: the token refresh and exchange code in `references/shopify-tokens.md`, against a local stand-in for Shopify's token endpoint.
+- `gadget-migration/shopify-token-move.test.ts`: the token move script in `references/shopify-tokens.md`, against stand-ins for the Gadget client, Prisma, and Shopify's token endpoint in `fixtures/fake-token-move`. It covers stores Shopify refuses, reruns, and a run that dies between saving a session and clearing Gadget's refresh token.
 - `gadget-migration/inventory.test.ts`: `scripts/inventory.ts` on the sample app in `gadget-migration/fixtures/sample-app`.
 - `gadget-migration/data-export.test.ts`: the export script in `references/data-export.md`, against the fake client in `fixtures/fake-gadget-client`, including failed requests and restarts.
 - `gadget-migration/coverage-*.test.ts`: the BigCommerce verifier in `assets/bigcommerce-signed-payload.ts` and the API key code in `references/external-api-clients.md`.
@@ -29,11 +30,11 @@ DATABASE_URL=postgres://postgres@127.0.0.1:5432/postgres REDIS_URL=redis://127.0
 
 `PGBOUNCER_PORT` changes the pooler's port (default 64352).
 
-Shopify's app library, from `gadget-migration/shopify-template`, against a local stand-in for Shopify:
+Shopify's app library, from `gadget-migration/shopify-template`, against a local stand-in for Shopify. The tests that run the install code from `references/shopify-webhooks.md` inside the library's `afterAuth` hook need Postgres and skip without `DATABASE_URL`:
 
 ```bash
 cd tests/gadget-migration/shopify-template
-npm test
+DATABASE_URL=postgres://postgres@127.0.0.1:5432/postgres npm test
 ```
 
 Password imports through bcryptjs and Better Auth, from `gadget-migration/auth`:

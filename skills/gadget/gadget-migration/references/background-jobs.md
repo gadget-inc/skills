@@ -34,6 +34,8 @@ Code that read `trigger.attemptNumber` or `trigger.finalAttempt` needs the queue
 
 A background action stopped at the action's timeout: 15 seconds by default on framework 1.4 and later, 3 minutes before that, and whatever `timeoutMS` set, up to 15 minutes. BullMQ has no job timeout, so a job that hangs on a remote call holds its slot until the worker restarts. Pass an `AbortSignal.timeout(ms)` to every `fetch` in a job. Cloud Tasks gives an HTTP handler 10 minutes by default and 30 at most.
 
+The host has a limit too, and a job delivered as an HTTP request ends at whichever limit is shorter. Cloud Run fails a request with a `504` after 5 minutes by default, and 60 minutes is the most it allows. Vercel ends a function after 300 seconds by default. That is also the most the Hobby plan allows, and Pro allows 800 seconds. So an action with `timeoutMS` of 12 minutes, delivered by Cloud Tasks to a Cloud Run service with default settings, fails at 5 minutes. Cloud Tasks retries it from the start, and it fails at 5 minutes on every attempt. Set the host's timeout and the queue's deadline above the longest `timeoutMS` the inventory lists, or split the work into jobs that each finish well inside the limit.
+
 ## Duplicate jobs
 
 ```typescript
@@ -203,6 +205,7 @@ Let Gadget finish the background actions already queued, and watch the Queues da
 - **Jobs that can't run twice.** Every queue retries. Increments and "send email" steps need an idempotency key.
 - **Assuming the scheduler skips overlaps or retries.** Check the host's rules, and add the lock.
 - **Queuing inside the database transaction.** A rollback doesn't take the job back, and the worker can pick the job up before the commit and not find the row.
+- **A host timeout shorter than the job.** The job fails at the same point on every retry. Check the host's request timeout as well as the queue's.
 - **A priority on some jobs only.** In BullMQ the jobs with no priority run first.
 - **A cron process that never exits.** Railway skips a run while the last one is still going, so a script that leaves a database pool or Redis connection open blocks every later run. Close them when the work is done.
 

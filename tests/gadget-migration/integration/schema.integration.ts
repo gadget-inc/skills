@@ -131,6 +131,47 @@ describe("schema-mapping.md", { skip }, () => {
     assert.deepEqual(rows, [{ customer_id: 500, total_order_value: "17.50" }, { customer_id: 501, total_order_value: null }]);
   });
 
+  it("reads every store's orders for one store's page until the index exists, although shop_id has a foreign key", async () => {
+    const latestOrders = sql("schema-mapping.md", "app/sql/latest_orders.sql").replace(/^-- in .*\n/, "").replace("$1", "1042");
+    const client = await admin.connect();
+    try {
+      // rolled back at the end, so the other tests never see these rows or the index
+      await client.query("begin");
+      // 20,000 orders across 200 stores, the numbers the reference gives
+      await client.query("insert into shopify_shop (id, myshopify_domain) select 1000 + n, 'store-' || n || '.myshopify.com' from generate_series(0, 199) n");
+      await client.query(
+        "insert into shopify_order (id, shop_id, total_price, shopify_created_at) select 100000 + n, 1000 + n % 200, 10, now() - n * interval '1 minute' from generate_series(0, 19999) n"
+      );
+      // start from what Postgres gives a foreign key column by itself: the constraint and no index
+      const { rows: indexes } = await client.query("select indexname from pg_indexes where tablename = 'shopify_order' and indexname <> 'shopify_order_pkey'");
+      for (const { indexname } of indexes) await client.query(`drop index "${indexname}"`);
+      const foreignKey = "select 1 from pg_constraint where conrelid = 'shopify_order'::regclass and contype = 'f'";
+      // an earlier test adds the foreign keys. Add this one here when that test was filtered out
+      if ((await client.query(foreignKey)).rowCount === 0) await client.query(foreignKeys.find((statement) => /"shopify_order"/.test(statement))!);
+      assert.equal((await client.query(foreignKey)).rowCount, 1);
+      await client.query("analyze shopify_order");
+
+      const plan = async () => (await client.query(`explain ${latestOrders}`)).rows.map((row) => row["QUERY PLAN"]).join("\n");
+      const before = await plan();
+      assert.match(before, /Seq Scan on shopify_order/);
+      assert.doesNotMatch(before, /Index/);
+
+      await client.query(sql("schema-mapping.md", "db/migrations/shopify_order_shop_created_index.sql"));
+      await client.query("analyze shopify_order");
+      const after = await plan();
+      assert.match(after, /Index Scan using shopify_order_shop_id_shopify_created_at_idx/);
+      assert.doesNotMatch(after, /Seq Scan|Sort/); // the index also returns the rows already in order
+
+      // the query returns the store's 50 newest orders either way
+      const { rows } = await client.query(latestOrders);
+      assert.equal(rows.length, 50);
+      assert.equal(Number(rows[0].id), 100000 + 42);
+    } finally {
+      await client.query("rollback");
+      client.release();
+    }
+  });
+
   it("reads a date-only value the same in any session time zone when cast straight to date", async () => {
     const client = await admin.connect();
     try {

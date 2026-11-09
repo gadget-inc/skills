@@ -10,7 +10,8 @@ Each of these has broken a cutover that got the order right:
 
 - **Use the same Shopify app.** The new app runs with the `client_id` and client secret of the app merchants already installed. Run `shopify app config link` in the new project and pick that app. A new Shopify app has no installs, and every merchant would have to install again.
 - **Rehearse on a development store with a separate Shopify app.** Install the new code there, send it real webhooks, and run the token script from [shopify-tokens.md](shopify-tokens.md) against it once.
-- **Set production environment variables on the new host**, including the values Gadget supplied (`GADGET_APP_URL` and the rest in [frontend.md](frontend.md)). `ggt var get` can't read secret values, so collect those from the services that issued them.
+- **Set production environment variables on the new host**, including the values Gadget supplied (`GADGET_APP_URL` and the rest in [frontend.md](frontend.md)). `ggt var get` can't read secret values, so collect those from the services that issued them. `ggt var list --app my-app --env production` prints the name of every variable, secrets included, so compare its output with the names set on the new host. A variable that is missing rarely fails loudly: a Slack notification whose webhook URL isn't set just stops arriving.
+- **Use Gadget's Shopify API version.** Set the template's `apiVersion` in `app/shopify.server.ts`, and `api_version` under `[webhooks]` in `shopify.app.toml`, to the version the inventory reports. Shopify renames and removes fields between versions, so a version change during the move breaks queries and webhook handlers that were never touched. Upgrade afterwards, as its own change.
 - **Run database migrations and time a full import.** The catch-up export in [data-export.md](data-export.md) only works if you noted when the first export started.
 - **List everything outside Shopify that calls the Gadget app.** Webhooks from other services (payment, email, shipping, ERP) point at `https://my-app.gadget.app/...` routes and are signed with secrets you need on the new host. OAuth clients for other services list Gadget redirect URLs. Scripts, storefront themes, and other apps may call the Gadget API with an API key. Each one needs its URL changed at the switch, and Shopify's deploy changes none of them.
 - **Verify the email sending domain** with the new provider. Gadget's built-in email sends from `noreply@my-app.gadget.app` unless your code set a `from` on your own domain, and that address stops working for you.
@@ -54,6 +55,7 @@ After the Gadget app is deleted, tighten the list: remove `396982` unless the ne
 - **Deploy from the Gadget editor after the switch.** On framework 1.7 and later, an editor deploy runs `shopify app deploy` with Gadget's `shopify.app.toml`, which points webhooks and app URLs back at Gadget and registers per-store subscriptions again. If Gadget's code has to change after the switch, deploy it with `ggt deploy`, which doesn't run `shopify app deploy`.
 - **Change Shopify models or webhook triggers in Gadget after the switch.** On framework versions before 1.7, a deploy with those changes registers per-store subscriptions again.
 - **Delete the Gadget app before per-store subscriptions are gone.** Deleting the app doesn't remove them from Shopify.
+- **Build the new app inside the directory you run `ggt` from.** `ggt` pushes every file its `.ignore` file doesn't match, so the new app's files land in Gadget. `.ignore` follows `.gitignore` rules, where a pattern with no leading slash matches at any depth: `routes`, added to keep the new app's folder out, also stops new files under `api/routes` from reaching Gadget. Keep the pulled Gadget app in a directory of its own.
 
 ## Delete per-store webhook subscriptions
 
@@ -122,10 +124,18 @@ The last cheap point to move back is before step 8. After tokens move, moving ba
 
 ## Moving stores in stages
 
-Shopify sends every store to the same `application_url` and delivers each app-level webhook to one address, so step 6 moves every store's traffic at once. A store-by-store move only fits the work that isn't tied to those URLs:
+Shopify sends every store to the same `application_url` and delivers each app-level webhook to one address, so step 6 moves every store's traffic at once. That is the default, and the right choice for most apps. A store-by-store move fits the work that isn't tied to those URLs:
 
 - **Tokens and background work.** After step 6, move tokens for a handful of stores first, watch the new app refresh them and run its jobs for those stores, then move the rest. Stores whose tokens haven't moved get new ones when a merchant opens the new app.
 - **Web apps without Shopify.** Add a column that says which app handles each customer account and route requests on it at your own domain, since no outside party fixes the URL.
+
+Traffic tied to those URLs can be staged too, but only by building a forwarding layer. The new app becomes the address for every store in step 6, keeps a column that says which app handles each store, and passes requests for stores that haven't moved on to Gadget. What is known about each kind of request:
+
+- **Webhooks forward cleanly.** Gadget checks a Shopify webhook by its HMAC over the raw body, and reads the store and topic from the `X-Shopify-` headers. Send the exact bytes Shopify sent, with those headers, to the Gadget app's webhook URL, and Gadget accepts it. A body that was parsed and serialized again fails the HMAC check. Answer Shopify with the status Gadget returned, inside the same 5 seconds.
+- **Admin requests are harder.** The first request for a page names the store in its query string, and API calls carry a session token that names it. The scripts and styles the page then loads name no store, so the forwarder can't route them by store. This skill has no tested recipe for forwarding the embedded admin.
+- **Per-store webhook subscriptions don't go through the forwarder.** They deliver straight to Gadget until you delete them for that store.
+
+The token rule decides the order for each store: a merchant request that the forwarder passes to Gadget can make Gadget run a token exchange, which retires tokens the new app holds. So flip a store's column first, then move its tokens, and never forward a request for a store after its flip. This costs a forwarder that must stay up for the whole move, and two apps to watch for as long as it lasts. Forwarding wasn't run end to end for this skill.
 
 Only one app may hold a store's tokens at any time, staged or not.
 

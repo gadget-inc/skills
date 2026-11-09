@@ -40,6 +40,8 @@ let shopify: any;
 let api: any;
 let Session: any;
 let storage: any;
+// builds another app with the template's settings plus the given ones, and its own session storage
+let makeApp: (extra: object) => { app: any; storage: any };
 
 before(async () => {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -73,6 +75,11 @@ before(async () => {
     future: { expiringOfflineAccessTokens: true },
   });
   api = shopifyApiModule.shopifyApi({ ...config, hostName: "app.example.com", isEmbeddedApp: true });
+  makeApp = (extra) => {
+    const ownStorage = new MemorySessionStorage();
+    const app = shopifyApp({ ...config, sessionStorage: ownStorage, distribution: AppDistribution.AppStore, future: { expiringOfflineAccessTokens: true }, ...extra });
+    return { app, storage: ownStorage };
+  };
 });
 
 beforeEach(() => {
@@ -93,12 +100,12 @@ const statusOf = async (promise: Promise<unknown>) => {
 };
 
 // The row scripts/move-shopify-tokens.ts writes, read back the way the template's Prisma session storage reads it.
-const storeMovedSession = async (row: { accessToken: string; expires: Date | null; refreshToken: string | null; refreshTokenExpires: Date | null }) => {
+const storeMovedSession = async (row: { accessToken: string; expires: Date | null; refreshToken: string | null; refreshTokenExpires: Date | null }, into: any = storage) => {
   const properties: Record<string, unknown> = { id: `offline_${SHOP}`, shop: SHOP, state: "", isOnline: false, scope: "read_orders", accessToken: row.accessToken };
   if (row.expires) properties.expires = row.expires.getTime();
   if (row.refreshToken) properties.refreshToken = row.refreshToken;
   if (row.refreshTokenExpires) properties.refreshTokenExpires = row.refreshTokenExpires.getTime();
-  await storage.storeSession(Session.fromPropertyArray(Object.entries(properties), true));
+  await into.storeSession(Session.fromPropertyArray(Object.entries(properties), true));
 };
 const minutes = (count: number) => new Date(Date.now() + count * 60_000);
 const tokenResponse = { access_token: "shpat_new", scope: "read_orders", expires_in: 3600, refresh_token: "shprt_new", refresh_token_expires_in: 7776000 };
@@ -212,16 +219,17 @@ describe("offline sessions written by the token move script", () => {
   });
 });
 
-describe("authenticate.admin when a merchant opens the app", () => {
-  const sessionToken = () => {
-    const now = Math.floor(Date.now() / 1000);
-    const payload = { iss: `https://${SHOP}/admin`, dest: `https://${SHOP}`, aud: API_KEY, sub: "42", exp: now + 60, nbf: now, iat: now, jti: crypto.randomUUID(), sid: "abc" };
-    const segment = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
-    const unsigned = `${segment({ alg: "HS256", typ: "JWT" })}.${segment(payload)}`;
-    return `${unsigned}.${sign(unsigned, "base64url")}`;
-  };
-  const adminRequest = () => new Request("https://app.example.com/app/orders", { headers: { Authorization: `Bearer ${sessionToken()}` } });
+// A request from the embedded admin, with a new session token each time.
+const sessionToken = () => {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = { iss: `https://${SHOP}/admin`, dest: `https://${SHOP}`, aud: API_KEY, sub: "42", exp: now + 60, nbf: now, iat: now, jti: crypto.randomUUID(), sid: "abc" };
+  const segment = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const unsigned = `${segment({ alg: "HS256", typ: "JWT" })}.${segment(payload)}`;
+  return `${unsigned}.${sign(unsigned, "base64url")}`;
+};
+const adminRequest = () => new Request("https://app.example.com/app/orders", { headers: { Authorization: `Bearer ${sessionToken()}` } });
 
+describe("authenticate.admin when a merchant opens the app", () => {
   it("keeps a moved non-expiring token and asks Shopify for nothing", async () => {
     await storeMovedSession({ accessToken: "shpat_forever", expires: null, refreshToken: null, refreshTokenExpires: null });
     const { session } = await shopify.authenticate.admin(adminRequest());
@@ -238,6 +246,166 @@ describe("authenticate.admin when a merchant opens the app", () => {
     assert.equal(seen[0].body.subject_token_type, "urn:ietf:params:oauth:token-type:id_token");
     assert.equal(seen[0].body.expiring, "1");
     assert.equal(seen[0].body.refresh_token, undefined);
+  });
+});
+
+// Answers the two requests an afterAuth hook causes: the token exchange, and the hook's shop query.
+const SHOP_ID = 111222333n;
+const answerShopify = () => {
+  respond = (request) =>
+    request.path === "/admin/oauth/access_token" ? { status: 200, body: tokenResponse } : { status: 200, body: { data: { shop: { id: `gid://shopify/Shop/${SHOP_ID}` } } } };
+};
+const exchanges = () => seen.filter((request) => request.path === "/admin/oauth/access_token").length;
+
+describe("hooks.afterAuth", () => {
+  it("runs after every token exchange: on a store's first visit, and again when its stored token is in its last 5 minutes", async () => {
+    const hookRuns: string[] = [];
+    const { app, storage: own } = makeApp({ hooks: { afterAuth: async ({ session }: any) => void hookRuns.push(session.shop) } });
+    answerShopify();
+
+    // the first visit after the move: the store is installed, and the new app has no session for it
+    await app.authenticate.admin(adminRequest());
+    assert.deepEqual(hookRuns, [SHOP]);
+    assert.equal(exchanges(), 1);
+
+    // a visit while the stored token has most of its hour left exchanges nothing and runs no hook
+    await app.authenticate.admin(adminRequest());
+    assert.deepEqual(hookRuns, [SHOP]);
+    assert.equal(exchanges(), 1);
+
+    // a visit that finds the token in its last 5 minutes exchanges again, and the hook runs again
+    await storeMovedSession({ accessToken: "shpat_old", expires: minutes(4), refreshToken: "shprt_old", refreshTokenExpires: minutes(60 * 24 * 80) }, own);
+    await app.authenticate.admin(adminRequest());
+    assert.deepEqual(hookRuns, [SHOP, SHOP]);
+    assert.equal(exchanges(), 2);
+  });
+
+  it("runs once for each of two requests that arrive together, and fails the request with 500 when the hook throws", async () => {
+    let hookRuns = 0;
+    const { app, storage: own } = makeApp({
+      hooks: {
+        afterAuth: async () => {
+          if (++hookRuns === 3) throw new Error("install code failed");
+        },
+      },
+    });
+    answerShopify();
+    await Promise.all([app.authenticate.admin(adminRequest()), app.authenticate.admin(adminRequest())]);
+    assert.equal(exchanges(), 2);
+    assert.equal(hookRuns, 2);
+
+    await own.deleteSession(`offline_${SHOP}`);
+    assert.equal(await statusOf(app.authenticate.admin(adminRequest())), 500);
+  });
+});
+
+const DATABASE_URL = process.env.DATABASE_URL;
+
+describe("claimInstall from shopify-webhooks.md inside hooks.afterAuth", { skip: !DATABASE_URL && "set DATABASE_URL to a Postgres superuser URL" }, () => {
+  let pool: any;
+  let app: any;
+  let own: any;
+  let installs: bigint[] = [];
+  let reinstalls: bigint[] = [];
+  let hookRuns = 0;
+  let failInstall = false;
+  let claimInstall: Function;
+
+  before(async () => {
+    const { default: pg } = await import("pg");
+    const name = "gadget_migration_after_auth_test";
+    const bootstrap = new pg.Client({ connectionString: DATABASE_URL });
+    await bootstrap.connect();
+    await bootstrap.query(`drop database if exists ${name}`);
+    await bootstrap.query(`create database ${name}`);
+    await bootstrap.end();
+    const url = new URL(DATABASE_URL!);
+    url.pathname = `/${name}`;
+    pool = new pg.Pool({ connectionString: url.toString(), max: 10 });
+    // the columns of ShopifyShop in schema-mapping.md's Prisma schema
+    await pool.query("create table shopify_shop (id bigint primary key, myshopify_domain text not null, state text not null default 'installed')");
+
+    const { blocks, importBlock } = await import("../integration/snippets.ts");
+    ({ claimInstall } = await importBlock(blocks("shopify-webhooks.md", "app/shopify/afterAuth.server.ts")[0]));
+    const handlers = {
+      onInstall: async (shopId: bigint) => {
+        installs.push(shopId);
+        if (failInstall) throw new Error("install code failed");
+      },
+      onReinstall: async (shopId: bigint) => void reinstalls.push(shopId),
+    };
+    // wired the way the reference wires it in shopify.server.ts
+    ({ app, storage: own } = makeApp({
+      hooks: {
+        afterAuth: ({ session, admin }: any) => {
+          hookRuns++;
+          return claimInstall(pool, admin, session.shop, handlers);
+        },
+      },
+    }));
+  });
+
+  beforeEach(async () => {
+    installs = [];
+    reinstalls = [];
+    hookRuns = 0;
+    failInstall = false;
+    await pool.query("truncate shopify_shop");
+    await own.deleteSession(`offline_${SHOP}`);
+    answerShopify();
+  });
+
+  after(() => pool?.end());
+
+  const state = async () => (await pool.query("select id::text, myshopify_domain, state from shopify_shop")).rows;
+
+  it("runs the install code once when two merchant requests exchange tokens at the same moment", async () => {
+    await Promise.all([app.authenticate.admin(adminRequest()), app.authenticate.admin(adminRequest())]);
+    // both requests exchanged a token and both ran the hook, and only one of them claimed the install
+    assert.equal(exchanges(), 2);
+    assert.equal(hookRuns, 2);
+    assert.deepEqual(installs, [SHOP_ID]);
+    assert.deepEqual(reinstalls, []);
+    assert.deepEqual(await state(), [{ id: String(SHOP_ID), myshopify_domain: SHOP, state: "installed" }]);
+  });
+
+  it("runs the install code once across 20 hooks racing on one new store", async () => {
+    const admin = { graphql: async () => Response.json({ data: { shop: { id: `gid://shopify/Shop/${SHOP_ID}` } } }) };
+    const handlers = { onInstall: async (shopId: bigint) => void installs.push(shopId), onReinstall: async (shopId: bigint) => void reinstalls.push(shopId) };
+    await Promise.all(Array.from({ length: 20 }, () => claimInstall(pool, admin, SHOP, handlers)));
+    assert.deepEqual(installs, [SHOP_ID]);
+    assert.deepEqual(reinstalls, []);
+  });
+
+  it("runs neither handler for a store imported from Gadget, on its first visit or on a later token exchange", async () => {
+    await pool.query("insert into shopify_shop (id, myshopify_domain, state) values ($1, $2, 'installed')", [String(SHOP_ID), SHOP]);
+    await app.authenticate.admin(adminRequest());
+    await storeMovedSession({ accessToken: "shpat_old", expires: minutes(4), refreshToken: "shprt_old", refreshTokenExpires: minutes(60 * 24 * 80) }, own);
+    await app.authenticate.admin(adminRequest());
+    assert.equal(hookRuns, 2);
+    assert.deepEqual(installs, []);
+    assert.deepEqual(reinstalls, []);
+  });
+
+  it("runs the reinstall code once when a store that uninstalled comes back, even with two requests at once", async () => {
+    await pool.query("insert into shopify_shop (id, myshopify_domain, state) values ($1, $2, 'uninstalled')", [String(SHOP_ID), SHOP]);
+    await Promise.all([app.authenticate.admin(adminRequest()), app.authenticate.admin(adminRequest())]);
+    assert.equal(hookRuns, 2);
+    assert.deepEqual(installs, []);
+    assert.deepEqual(reinstalls, [SHOP_ID]);
+    assert.equal((await state())[0].state, "installed");
+  });
+
+  it("does not run the install code again after it threw, because the row was already claimed", async () => {
+    failInstall = true;
+    assert.equal(await statusOf(app.authenticate.admin(adminRequest())), 500);
+    assert.deepEqual(installs, [SHOP_ID]);
+
+    failInstall = false;
+    await own.deleteSession(`offline_${SHOP}`);
+    await app.authenticate.admin(adminRequest());
+    assert.equal(hookRuns, 2);
+    assert.deepEqual(installs, [SHOP_ID]); // still one: the next visit found the row
   });
 });
 

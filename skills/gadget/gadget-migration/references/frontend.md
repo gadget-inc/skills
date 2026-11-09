@@ -2,7 +2,9 @@
 
 ## What is this?
 
-The frontend talks to Gadget through the generated client (`@gadget-client/my-app`, imported from `web/api`) and the hooks in `@gadgetinc/react`. Both speak Gadget's GraphQL API, so pointing them at a new server doesn't work. Every call site is rewritten. To find them all, search for imports of `web/api` and of `@gadgetinc/*`; the inventory script counts each hook.
+The frontend talks to Gadget through the generated client (`@gadget-client/my-app`, imported from `web/api`) and the hooks in `@gadgetinc/react`. Both speak Gadget's GraphQL API, so pointing them at a new server doesn't work. The default is to rewrite every call site, and the rest of this file shows how. To find them all, search for imports of `web/api` and of `@gadgetinc/*`; the inventory script counts each hook.
+
+The alternative is to keep the call sites and replace the packages: alias `@gadget-client/my-app` and `@gadgetinc/react` in the bundler to modules of your own that export the same names and call your new API. It saves the rewrite on an app with hundreds of call sites, and it moves the risk into the replacement, which has to return what Gadget returned. `useFindMany` returns `[{ data, fetching, error }, refetch]`. A list has `hasNextPage`, `hasPreviousPage`, `nextPage()`, and `previousPage()`. A related record comes back as an object, such as `shop: { id: "42" }`, and its bare id as `shopId`. Ids are strings, and `select` decides which fields come back. A replacement that gets one of these wrong usually shows up as a page that renders nothing, not as an error, so open every page against it before relying on it. Treat it as a way to move sooner, and still plan the rewrite.
 
 The components themselves mostly survive. A Gadget frontend is a Vite React app in `web/`, usually with React Router or Remix routes, so the JSX, styles, and route layout move across. What changes is where each component gets its data and how it sends writes.
 

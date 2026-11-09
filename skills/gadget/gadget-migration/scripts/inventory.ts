@@ -101,7 +101,8 @@ say();
 list(
   [
     settings.match(/frameworkVersion:\s*"([^"]+)"/)?.[1] && `Framework version: \`${settings.match(/frameworkVersion:\s*"([^"]+)"/)![1]}\``,
-    settings.match(/apiVersion:\s*"([^"]+)"/)?.[1] && `Shopify API version: \`${settings.match(/apiVersion:\s*"([^"]+)"/)![1]}\``,
+    settings.match(/apiVersion:\s*"([^"]+)"/)?.[1] &&
+      `Shopify API version: \`${settings.match(/apiVersion:\s*"([^"]+)"/)![1]}\`. Set the new app's \`apiVersion\` and the \`[webhooks]\` \`api_version\` in its \`shopify.app.toml\` to the same version`,
     /shopify\s*:/.test(settings) && "Shopify connection (see references/shopify-tokens.md and references/shopify-webhooks.md)",
     /emailPassword/.test(settings) && "Email and password sign-in (see references/users-and-auth.md)",
     /google(OAuth)?\s*:/.test(settings) && "Google sign-in (see references/users-and-auth.md)",
@@ -129,6 +130,7 @@ for (const file of tomlFiles) {
       compliance.length ? `Compliance topics: ${compliance.map((topic) => `\`${topic}\``).join(", ")}` : "",
       uris.length ? `Webhook URIs to change at cutover: ${uris.map((uri) => `\`${uri}\``).join(", ")}` : "",
       /include_fields/.test(toml) ? "Some subscriptions use `include_fields`: keep `updated_at` in each list" : "",
+      ...[...toml.matchAll(/^\s*filter\s*=\s*"((?:[^"\\]|\\.)*)"/gm)].map((match) => `Webhook filter \`${match[1].replace(/\\"/g, '"')}\`: keep it on the new subscription`),
       /\[app_proxy\]/.test(toml) ? "App proxy configured: change its `url` at cutover (see references/shopify-signatures.md)" : "",
       toml.match(/application_url\s*=\s*"([^"]+)"/) ? `application_url: \`${toml.match(/application_url\s*=\s*"([^"]+)"/)![1]}\`` : "",
       toml.match(/scopes\s*=\s*"([^"]*)"/) ? `Access scopes: \`${toml.match(/scopes\s*=\s*"([^"]*)"/)![1]}\`` : "",
@@ -254,7 +256,7 @@ if (careLines.length) {
   say();
 }
 if (relationshipLines.length) {
-  say(`### Relationships (keep every record id so these keep pointing at the right rows)`);
+  say(`### Relationships (keep every record id so these keep pointing at the right rows, and index each of these columns: Gadget did, and Postgres doesn't index a foreign key)`);
   say();
   list(relationshipLines);
   say();
@@ -300,13 +302,18 @@ for (const file of actionFiles) {
   const webhookTopics = [...(objectAfter(triggers, /shopify\s*:\s*/) ?? "").matchAll(/"([a-z_]+\/[a-z_]+)"/g)].map((match) => match[1]);
   const actionModel = file.match(/^api\/models\/(.+)\/actions\/(\w+)\.(ts|js)$/);
   const isShopifyRecordAction = Boolean(actionModel && shopifyModels.has(actionModel[1]) && ["create", "update", "delete"].includes(actionModel[2]));
+  // before framework 1.7, and for models with metafield fields, a webhook filter lives in the trigger
+  const shopifyFilter = /shopifyFilter\s*:\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|`([^`]*)`)/.exec(triggers);
+  const filterText = shopifyFilter ? (shopifyFilter[1] ?? shopifyFilter[2] ?? shopifyFilter[3]).replace(/\\(["'])/g, "$1") : "";
+  const filterNote = filterText ? ` (shopifyFilter \`${filterText}\`: set it as the subscription's \`filter\`)` : "";
   if (webhookTopics.length) {
     traits.push(`webhooks: ${webhookTopics.join(", ")}`);
-    webhookActionLines.push(`\`${name}\`: ${webhookTopics.map((topic) => `\`${topic}\``).join(", ")}`);
+    webhookActionLines.push(`\`${name}\`: ${webhookTopics.map((topic) => `\`${topic}\``).join(", ")}${filterNote}`);
   } else if (/shopify\s*:/.test(triggers) || isShopifyRecordAction) {
     traits.push("runs for Shopify webhooks, syncs, and reconciliation");
-    webhookActionLines.push(`\`${name}\`: topics come from \`shopify.app.toml\` or the Shopify connection settings`);
+    webhookActionLines.push(`\`${name}\`: topics come from \`shopify.app.toml\` or the Shopify connection settings${filterNote}`);
   }
+  if (filterText) traits.push("filters webhooks with shopifyFilter");
   if (/transactional\s*:\s*false/.test(options)) traits.push("transactional: false");
   const timeout = options.match(/timeoutMS\s*:\s*([\d_]+)/);
   if (timeout) traits.push(`timeoutMS ${timeout[1]}`);

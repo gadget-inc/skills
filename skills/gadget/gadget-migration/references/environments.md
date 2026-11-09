@@ -45,8 +45,24 @@ Each developer needs what a Gadget development environment was: the app running 
 
 - **Database.** Postgres in Docker on the developer's machine, or a branch per developer on a provider that has branching, such as Neon or Supabase. Add a seed script that creates enough records to work with. Do not point development at the production database.
 - **Environment variables.** Gadget stored a value per environment. Keep a committed `.env.example` with the names and an uncommitted `.env` with development values. Production values live in the host's secret settings.
+- **Queues.** Gadget kept each environment's background actions apart. BullMQ names its Redis keys `bull:<queue name>` in every environment, so two environments on one Redis server share each queue: a staging worker takes a production job and runs it with staging's code against staging's database. Give each environment its own Redis server or Redis database number, or its own key prefix (below). The same goes for any lock or cache key you keep in Redis.
 - **Shopify.** `shopify app dev` runs the app, opens a tunnel, and points a development app's URLs at it. Give each environment its own Shopify app and its own config file, such as `shopify.app.development.toml` and `shopify.app.staging.toml`, created with `shopify app config link`. Apps on framework version 1.7 and later already have this layout, with one TOML file per Gadget environment. Never run `shopify app dev` with the production config, because it can point the production app's URLs at your tunnel.
 - **Webhooks from other services.** A local server has no public URL. Use the service's CLI to forward events, such as `stripe listen`, or a tunnel.
+
+A prefix per environment keeps BullMQ queues apart on a shared Redis server:
+
+```typescript
+// in app/queueOptions.server.ts
+type Connection = { host: string; port: number };
+
+// Pass the result to every Queue, Worker, and QueueEvents. Without a prefix they all use "bull".
+export const queueOptions = (connection: Connection, environment = process.env.APP_ENV) => {
+  if (!environment) throw new Error("set APP_ENV, such as production or staging");
+  return { connection, prefix: `bull-${environment}` };
+};
+```
+
+A queue and its workers must be given the same prefix. A worker on another prefix never sees the queue's jobs.
 
 ## Staging and previews
 
@@ -86,6 +102,7 @@ Everything that names the old domain needs the new one: Shopify or BigCommerce a
 - **Renaming or dropping a column in one deploy.** Old servers fail until the rollout finishes.
 - **Running migrations from every server at boot.** Two servers apply the same migration at once.
 - **Sharing one development database.** One developer's migration breaks everyone else's branch.
+- **One Redis for two environments.** Staging workers take production's jobs unless each environment has its own prefix.
 - **Running `shopify app dev` with the production config.** It can point production's URLs at a laptop.
 - **No replacement for the queues page.** The first failed job has nowhere to be seen or retried.
 

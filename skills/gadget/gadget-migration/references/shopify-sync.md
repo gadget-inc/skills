@@ -99,10 +99,17 @@ let after: string | null = null;
 do {
   const response = await admin.graphql(RECONCILE_ORDERS, { variables: { query: `updated_at:>='${since}'`, after } });
   const { data } = await response.json();
-  for (const order of data.orders.nodes) await upsertOrderFromReconciliation(shopId, order);
+  // the same function the webhook job calls, so a missed webhook still sends its email or queues its job
+  for (const order of data.orders.nodes) await handleOrderUpdated(shopId, order, { source: "reconciliation" });
   after = data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null;
 } while (after);
 ```
+
+Gadget ran the whole model action for each record its reconciliation found, `onSuccess` included, with `trigger.type` set to `shopify_webhook_reconciliation`. A reconciliation that only upserts rows repairs the data and nothing else: an `orders/updated` webhook Shopify never delivered leaves the order correct a day later, and the "order paid" email it should have caused is never sent. So call the ported action, and have it pick the reconciliation upsert when `source` says so. Skip the work when the upsert wrote no row, or every nightly run repeats the side effects for records that didn't change.
+
+The backfill on the day of the move is the opposite case. Gadget already ran your actions for those records, so a backfill that calls the same function sends every email a second time. Pass `source: "backfill"` and skip the side effects for it, the way an action that read `trigger.type` skipped them for `shopify_sync`.
+
+Some stores Gadget lists as installed can't be called. Shopify answers `402` for a store frozen for an unpaid bill, `423` for a locked store, and `401` when the token was revoked. These fail the same way on every attempt, so catch the error per store, record the store, and go on to the next one. A backfill or reconciliation that throws on the first such store never reaches the stores after it.
 
 Run the reconciliation per store as a job with a concurrency limit per store ([background-jobs.md](background-jobs.md)), so one large store doesn't use another job's share of that store's rate limit.
 
@@ -144,6 +151,9 @@ export async function pacedGraphql(admin: { graphql: Function }, query: string, 
 - **Paging a large backfill instead of using a bulk operation.** It stops at 25,000 objects and uses the store's whole rate limit.
 - **No `read_all_orders`.** The backfill looks complete and holds 60 days of orders.
 - **A reconciliation with the strict `<` check.** It never repairs a change made in the same second as the previous one.
+- **A reconciliation that only writes rows.** The record is repaired and the email or job its webhook would have caused never happens.
+- **Running side effects from the move-day backfill.** Gadget already ran them once for every record.
+- **Stopping on one store's error.** Frozen (`402`), locked (`423`), and revoked (`401`) stores fail every time. Record them and move on.
 - **Forgetting sync-only models.** Models without webhooks stop updating the day you switch.
 - **Requests from a host that isn't on the app's IP allowlist.** Shopify answers `403`. See [cutover.md](cutover.md).
 

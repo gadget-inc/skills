@@ -13,6 +13,7 @@ api_version = "2026-04"
   topics = [ "orders/create", "orders/updated" ]
   uri = "https://sample-app.gadget.app/api/webhooks/shopify"
   include_fields = [ "id", "updated_at", "total_price" ]
+  filter = "financial_status:paid"
 
   [[webhooks.subscriptions]]
   compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]

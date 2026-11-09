@@ -102,10 +102,13 @@ This script does steps 3 to 6 for an app on Shopify's React Router template, whi
 // in scripts/move-shopify-tokens.ts
 import { Client } from "@gadget-client/my-app";
 import { PrismaClient } from "@prisma/client";
-import { exchangeNonExpiringToken } from "../app/shopify/tokens.server";
+import { exchangeNonExpiringToken, ReauthorizationRequired } from "../app/shopify/tokens.server";
 
 const gadget = new Client({ environment: "Production", authenticationMode: { apiKey: process.env.GADGET_EXPORT_API_KEY! } });
 const prisma = new PrismaClient();
+
+const needMerchant: string[] = []; // Shopify refused the store's token for good
+const tryAgain: string[] = []; // the token request failed some other way
 
 let cursor: string | undefined;
 do {
@@ -114,6 +117,8 @@ do {
     const domain = shop.myshopifyDomain;
     const sessionId = `offline_${domain}`; // the template's offline session id
     if (await prisma.session.findUnique({ where: { id: sessionId } })) {
+      // a merchant visit or an earlier run that stopped early saved tokens here, so Gadget must not refresh again
+      if (shop.refreshToken) await gadget.internal.shopifyShop.update(shop.id, { refreshToken: null });
       console.log(`skip ${domain}: the new app already has a session`);
       continue;
     }
@@ -123,9 +128,18 @@ do {
       tokens = { accessToken: shop.accessToken, expiresAt: shop.accessTokenExpiresAt, refreshToken: shop.refreshToken, refreshTokenExpiresAt: shop.refreshTokenExpiresAt };
     } else if (shop.accessTokenExpiresAt) {
       console.log(`skip ${domain}: Shopify already rejected its refresh token, so it needs the merchant to open the app`);
+      needMerchant.push(domain);
       continue;
     } else {
-      tokens = await exchangeNonExpiringToken(domain, shop.accessToken);
+      try {
+        tokens = await exchangeNonExpiringToken(domain, shop.accessToken);
+      } catch (error) {
+        // one store's refusal must not end the run, or every later run stops at the same store.
+        // These errors name only the store and the status, so they are safe to print
+        (error instanceof ReauthorizationRequired ? needMerchant : tryAgain).push(domain);
+        console.error(`failed ${domain}: ${error instanceof ReauthorizationRequired ? "Shopify answered 401" : (error as Error).message}`);
+        continue;
+      }
     }
 
     await prisma.session.create({
@@ -146,9 +160,20 @@ do {
   }
   cursor = shops.hasNextPage ? shops.endCursor : undefined;
 } while (cursor);
+
+if (needMerchant.length) console.log(`${needMerchant.length} stores need their merchant to open the app: ${needMerchant.join(", ")}`);
+if (tryAgain.length) {
+  // 429 and 5xx pass on a later run. 400 and 403 fail the same way every time, so read the lines above
+  console.log(`${tryAgain.length} stores failed with another error: ${tryAgain.join(", ")}`);
+  process.exitCode = 1;
+}
 ```
 
 Run it on a development store first. Then, from the new host, run one Admin API query for that store through `unauthenticated.admin(shop)`. Run that check from the host and not from your laptop: Shopify's IP allowlist applies to Admin API requests, though not to the token requests the script makes. If the script stops partway, run it again. Stores it finished are skipped, and a repeated exchange returns the same pair.
+
+Some stores can't be moved by any run. Gadget can list a store as installed after Shopify stopped accepting its token, such as a store that uninstalled the app while its webhook was lost. Shopify refuses the exchange for those. The script records each one, goes on to the next store, and prints the list at the end. A store on that list gets tokens again when its merchant opens the new app, and until then `unauthenticated.admin` has no session for it, so skip it in background jobs. Without the catch, the first such store ends the run, it never gets a session, and every later run stops at the same store with the ones after it never reached.
+
+A run can also die between saving a store's session and clearing Gadget's refresh token. The next run finds the session and skips the store, so the skip clears Gadget's copy as well. Otherwise both apps keep refreshing that store.
 
 Things to know before running it on production:
 
@@ -233,6 +258,7 @@ Apps on another framework call `refreshOfflineToken` from the block above. Three
 - **Uninstalling the store from the Gadget editor.** That removes the app from the store, and the new app is the same Shopify app.
 - **Deploying the Gadget app from the editor after the switch.** On framework 1.7 and later, an editor deploy runs `shopify app deploy` with Gadget's TOML, which points webhooks and app URLs back at Gadget.
 - **Calling the Admin API from a host that isn't on the app's IP allowlist.** Every call fails with `403`.
+- **Letting one refused store end the token script.** Every rerun then stops at the same store. Record it and go on.
 - **Treating a refresh `401` as transient.** Retrying a retired refresh token never works. Mark the store and wait for the merchant, or use an application-only token.
 
 ## Related references

@@ -22,7 +22,7 @@ node path/to/skills/gadget-migration/scripts/inventory.ts . > MIGRATION_INVENTOR
 
 ## Order of work
 
-1. **Choose the platform.** Each part of the app needs a replacement: database, job queue, scheduler, sign-in, file storage, email, search.
+1. **Choose the platform.** Each part of the app needs a replacement: database, job queue, scheduler, sign-in, file storage, email, search. Put the database in the same region as the servers: Gadget ran them side by side, so code that makes many small queries per request pays a longer round trip on each one when they are apart.
 2. **Map the schema and export data.** [references/schema-mapping.md](references/schema-mapping.md), [references/data-export.md](references/data-export.md)
 3. **Port actions.** [references/actions-and-transactions.md](references/actions-and-transactions.md)
 4. **Port background and scheduled actions.** [references/background-jobs.md](references/background-jobs.md)
@@ -52,6 +52,7 @@ Use these when the inventory lists the feature:
 - **Every job can run twice.** Queues retry, and Shopify resends webhooks.
 - **Only one app holds a store's Shopify tokens at a time.** Two apps refreshing the same store retire each other's tokens, and on API version 2026-04 and later Gadget also replaces non-expiring tokens on its own, which revokes any copy.
 - **The new app is the same Shopify app.** It runs with the `client_id` and secret merchants already installed. A new Shopify app has no installs.
+- **The new app uses Gadget's Shopify API version.** Set the template's `apiVersion` and the TOML's `[webhooks]` `api_version` to the version the inventory reports. Upgrade later, as its own change.
 - **After the switch, nothing deploys from the Gadget editor.** On framework 1.7 and later that deploy points Shopify back at Gadget. Use `ggt deploy` if Gadget's code has to change.
 - **Every request from Shopify is verified.** Use `assets/shopify-signatures.ts`, or the template's `authenticate.*` helpers.
 
@@ -62,7 +63,7 @@ Plan around these. They are true today and may change:
 - **No direct database access.** Records leave through the data editor's CSV export or the API, at most 250 per request. A 2.4 million record model takes 9,600 requests.
 - **No bulk file download.** Each file leaves through its URL. Private file URLs expire 3 hours after you read the record.
 - **No one-step token handoff.** You read each store's tokens through the Internal API and clear Gadget's refresh token yourself, in the order [references/shopify-tokens.md](references/shopify-tokens.md) gives. Public apps can use application-only access tokens for background work instead, which retire nothing Gadget holds.
-- **No secret values.** `ggt var get` reads non-secret environment variables only. Get secret values from the service that issued them.
+- **No secret values.** `ggt var get` reads non-secret environment variables only. Get secret values from the service that issued them. `ggt var list` prints every name, secrets included, so compare it with the names on the new host before the switch.
 - **No sessions.** Every signed-in user of a web app signs in again. Password hashes do move: they are standard bcrypt ([references/users-and-auth.md](references/users-and-auth.md)).
 
 ## Files in this skill

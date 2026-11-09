@@ -127,7 +127,7 @@ The export is not a snapshot. It reads pages over minutes or hours while your ap
 
 1. **Note the time before the first export starts.**
 2. **Export changes after traffic stops.** Pass that time as the second argument, and the script writes only records with a newer `updatedAt` to `widget.changes.ndjson`. Load it with the same upsert. Run it once before cutover to shrink the gap and once after writes to Gadget stop.
-3. **Remove deleted records.** A deleted record is gone from Gadget, so no export mentions it. Export the ids again with `select: ["id"]` and delete rows in your table whose id is missing.
+3. **Remove deleted records.** A deleted record is gone from Gadget, so no export mentions it. Export the ids again with `select: ["id"]` and delete rows in your table whose id is missing. Delete only after that id export reached its last page, where `hasNextPage` is false. A run that stopped at 1.8 million of 2.4 million ids lists 600,000 live records as missing, and the delete removes all of them.
 
 Gadget sets `updatedAt` on every save, through an action or the Internal API, unless your code writes `updatedAt` itself. The upsert above compares Gadget's `updatedAt`, so keep that value in your table and don't replace it with the time you loaded the row.
 
