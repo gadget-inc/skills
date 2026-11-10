@@ -1,0 +1,31 @@
+# The local stack for stack.integration.ts, started with Supabase CLI 3.1.0 from this folder.
+# Ports 57420-57429, the pooler on in transaction mode, and the services the tests don't use off.
+project_id = "migcheck-supabase"
+
+[api]
+port = 57421
+
+[db]
+port = 57422
+shadow_port = 57420
+major_version = 17
+
+[db.pooler]
+enabled = true
+port = 57429
+pool_mode = "transaction"
+
+[studio]
+enabled = false
+
+[local_smtp]
+port = 57424
+
+[realtime]
+enabled = false
+
+[edge_runtime]
+enabled = false
+
+[analytics]
+enabled = false

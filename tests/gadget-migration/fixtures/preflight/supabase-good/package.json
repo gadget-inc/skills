@@ -1,0 +1,14 @@
+{
+  "name": "supabase-good",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "react-router build",
+    "db:push": "supabase db push --remote"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "@supabase/supabase-js": "2.119.0",
+    "prisma": "6.19.3"
+  }
+}

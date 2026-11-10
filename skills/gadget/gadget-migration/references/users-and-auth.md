@@ -37,11 +37,11 @@ const { error } = await supabase.auth.admin.createUser({
   email: user.email,
   password_hash: user.password?.hash, // leave out for Google-only users
   email_confirm: user.emailVerified,
-  app_metadata: { gadget_user_id: user.id },
+  app_metadata: { gadget_id: user.id },
 });
 ```
 
-Supabase user ids are UUIDs, so `"42"` can't be the id. Keep it in `app_metadata` and in a `gadget_user_id` column on your own users table, and point other tables at that column. Use `createUser` with a service role key, not an `insert into auth.users`: a hand-written row leaves token columns `NULL`, and sign-in then fails with a `500`.
+Supabase user ids are UUIDs, so `"42"` can't be the id. Keep it in `app_metadata.gadget_id`, the key Gadget's Supabase guide and its policies read, and in a `gadget_user_id` column on your own users table, and point other tables at that column. Use `createUser` with a service role key, not an `insert into auth.users`: a hand-written row leaves token columns `NULL`, and sign-in then fails with a `500`.
 
 ### Firebase Auth
 

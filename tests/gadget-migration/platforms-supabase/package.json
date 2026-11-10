@@ -1,0 +1,18 @@
+{
+  "name": "gadget-migration-platforms-supabase-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "pretest": "prisma generate --schema prisma/schema.prisma",
+    "test": "node --import ./register.mjs --test --test-concurrency=1 --test-timeout=180000 \"*.integration.ts\""
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "@supabase/supabase-js": "2.119.0",
+    "@types/node": "25.5.2",
+    "@types/pg": "8.15.6",
+    "pg": "8.23.1",
+    "prisma": "6.19.3",
+    "typescript": "5.9.3"
+  }
+}
