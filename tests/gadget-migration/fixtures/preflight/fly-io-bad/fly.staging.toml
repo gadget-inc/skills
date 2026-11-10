@@ -1,0 +1,13 @@
+app = "my-app"
+primary_region = "iad"
+
+[env]
+  APP_ENV = "staging"
+
+[processes]
+  web = "npm run start"
+  worker = "npm run worker"
+
+[http_service]
+  processes = ["web"]
+  internal_port = 3000

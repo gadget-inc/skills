@@ -1,0 +1,23 @@
+app = "my-app-staging"
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = 300
+
+[env]
+  APP_ENV = "staging"
+  SHOPIFY_APP_URL = "https://my-app-staging.fly.dev"
+
+[build.args]
+  VITE_APP_ENV = "staging"
+
+[deploy]
+  release_command = "npx prisma migrate deploy"
+
+[processes]
+  web = "npm run start"
+  worker = "node build/worker.js"
+
+[http_service]
+  processes = ["web"]
+  internal_port = 3000
+  auto_stop_machines = "off"

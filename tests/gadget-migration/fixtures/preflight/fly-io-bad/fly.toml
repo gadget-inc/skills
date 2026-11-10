@@ -1,0 +1,23 @@
+app = "my-app"
+primary_region = "iad"
+kill_timeout = 600
+
+[env]
+  APP_ENV = "production"
+  FLY_ENV = "production"
+  VITE_APP_ENV = "production"
+
+[build.args]
+  VITE_SUPPORT_URL = "https://app.example.com/support"
+
+[processes]
+  web = "npm run docker-start"
+  worker = "npm run worker"
+  cron = "supercronic /app/crontab"
+
+[http_service]
+  processes = ["web", "cron"]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  min_machines_running = 1

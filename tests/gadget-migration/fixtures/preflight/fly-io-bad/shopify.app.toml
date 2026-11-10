@@ -1,0 +1,18 @@
+client_id = "production-client-id"
+name = "my-app"
+application_url = "https://my-app.fly.dev"
+embedded = true
+
+[auth]
+redirect_urls = [
+  "https://my-app.fly.dev/auth/callback",
+  "https://my-app.fly.dev/auth/shopify/callback",
+  "https://my-app.fly.dev/api/auth/callback"
+]
+
+[webhooks]
+api_version = "2026-04"
+
+  [[webhooks.subscriptions]]
+  topics = ["orders/create"]
+  uri = "https://my-app.fly.dev/webhooks/orders/create"
