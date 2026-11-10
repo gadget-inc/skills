@@ -1,0 +1,61 @@
+# The same app as render-bad/render.yaml, done right. Its cron job is added at the cutover, not before.
+services:
+  - type: web
+    name: my-app-web
+    runtime: docker
+    region: oregon
+    plan: 1c-2g
+    numInstances: 2
+    healthCheckPath: /healthz
+    dockerCommand: npm run start
+    preDeployCommand: npx prisma migrate deploy
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: my-app-db
+          property: connectionPoolString
+      - key: DIRECT_DATABASE_URL
+        fromDatabase:
+          name: my-app-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: my-app-queue
+          property: connectionString
+      - fromGroup: my-app-config
+      - fromGroup: my-app-secrets
+  - type: worker
+    name: my-app-worker
+    runtime: docker
+    region: oregon
+    dockerCommand: node build/worker.js
+    maxShutdownDelaySeconds: 300
+  - type: worker
+    name: my-app-mailer
+    runtime: docker
+    region: oregon
+    dockerCommand: node build/mailer.js
+    maxShutdownDelaySeconds: 120
+  - type: pserv
+    name: my-app-admin
+    runtime: docker
+    region: oregon
+    dockerCommand: npm run start
+  - type: keyvalue
+    name: my-app-queue
+    region: oregon
+    plan: 1g
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
+databases:
+  - name: my-app-db
+    region: oregon
+    plan: 1c-4g
+    connectionPool: pgbouncer
+    ipAllowList: []
+envVarGroups:
+  - name: my-app-config
+    envVars:
+      - key: APP_ENV
+        value: production

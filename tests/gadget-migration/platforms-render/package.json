@@ -1,0 +1,22 @@
+{
+  "name": "gadget-migration-platforms-render-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "pretest": "prisma generate --schema prisma/schema.prisma",
+    "test": "node --test --test-timeout=180000 \"*.integration.ts\""
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "@renderinc/sdk": "1.8.0",
+    "@types/node": "25.5.2",
+    "@types/pg": "8.15.6",
+    "ajv": "8.17.1",
+    "bullmq": "6.7.3",
+    "ioredis": "6.0.0",
+    "pg": "8.23.1",
+    "prisma": "6.19.3",
+    "typescript": "5.9.3",
+    "yaml": "2.8.1"
+  }
+}

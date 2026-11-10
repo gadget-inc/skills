@@ -1,0 +1,18 @@
+{
+  "name": "my-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "react-router build",
+    "start": "react-router-serve ./build/server/index.js",
+    "docker-start": "npm run setup && npm run start",
+    "setup": "prisma generate && prisma migrate deploy"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.0",
+    "@renderinc/sdk": "1.8.0",
+    "bullmq": "^6.7.3",
+    "ioredis": "^6.0.0",
+    "prisma": "^6.19.0"
+  }
+}
