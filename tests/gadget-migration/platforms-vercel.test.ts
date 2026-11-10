@@ -170,13 +170,4 @@ describe("the files in references/platforms/vercel.md", () => {
     write(dir, "app/routes/schedules.reconcile-shops.tsx", route);
     assert.deepEqual(vercelFindings(dir).map(where), ["vercel/schedules-before-cutover vercel.json:4"]);
   });
-
-  it("pass the checks for Next.js, whose schedule targets a private function", () => {
-    const dir = tempDir();
-    write(dir, "vercel.json", json("vercel.json", 1));
-    write(dir, "package.json", JSON.stringify({ dependencies: { next: "16.4.6", "@vercel/schedules": "0.0.3", inngest: "4.26.2" } }));
-    write(dir, "app/api/schedules/prune-audit-logs/route.ts", block("vercel.md", "app/api/schedules/prune-audit-logs/route.ts"));
-    write(dir, "app/api/inngest/route.ts", 'import { serve } from "inngest/next";\nexport const { GET, POST, PUT } = serve({ client, functions });\n');
-    assert.deepEqual(vercelFindings(dir).map(where), ["vercel/schedules-before-cutover vercel.json:8"]);
-  });
 });

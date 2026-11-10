@@ -4,6 +4,8 @@
 
 Supabase is Postgres with sign-in, file storage, realtime updates, a queue (pgmq), a scheduler (pg_cron), and an HTTPS API built from your tables (the Data API). It runs no long-lived Node server, so the app server and job workers still need a Node host. Most of what goes wrong is in the database: tables the publishable key can read, a server role that skips every policy or can't see pgvector, and cron jobs that start too early and hide their failures. Gadget's guide: https://docs.gadget.dev/guides/moving-to-another-platform/supabase
 
+For Supabase itself (the CLI, the Data API's grants, row-level security rules, Postgres practice), load Supabase's `supabase` and `supabase-postgres-best-practices` skills: `npx skills add supabase/agent-skills` (https://github.com/supabase/agent-skills). This file covers only what breaks or changes because the app came from Gadget.
+
 Read [common.md](common.md) first.
 
 ## Checks to run
@@ -45,7 +47,6 @@ order by c.relname;
 | Failed cron runs, and failed `pg_net` calls (kept 6 hours) | `select j.jobname, d.status, d.return_message, d.start_time from cron.job_run_details d join cron.job j using (jobid) where d.status <> 'succeeded' order by d.start_time desc limit 20;` and `select id, status_code, error_msg, created from net._http_response where error_msg is not null or status_code >= 400 order by id desc;` |
 | Messages read more than once | `select msg_id, read_ct, enqueued_at, vt from pgmq.q_external where read_ct > 1;` and `select * from pgmq.metrics('external');` |
 | Room to load | `select pg_size_pretty(pg_database_size(current_database()));`, the disk size in **Database Settings**, and the Spend Cap in the organization's billing settings |
-| Supabase's own lints | **Advisors > Security Advisor** in the dashboard |
 
 ## Failure signatures
 
@@ -60,7 +61,6 @@ order by c.relname;
 | 0 rows for the server, or `[]` from the Data API, and no error | Row-level security is on and no policy names that role | A policy `to app_server`, such as `using (true)` for a table no store owns |
 | A view returns every store's rows while `app.shop_id` is one store | The view runs as `postgres`, which has `BYPASSRLS` | `with (security_invoker = true)` |
 | `permission denied for table audit_log` as `app_server` | The table was created before the default privileges migration, or by another role | `grant select, insert, update, delete on audit_log to app_server;` |
-| `Could not find the table 'public.audit_log' in the schema cache` | The table's schema isn't exposed, or the Data API hasn't reloaded | `notify pgrst, 'reload schema';` |
 | `relation "pgmq.q_external" does not exist` | The queue was made in the dashboard of another environment or branch | `select pgmq.create('external');` in a migration |
 | `permission denied for table q_reports`, or `permission denied for sequence q_external_msg_id_seq` from `pgmq.metrics` | A queue created after the grants, with no default privileges; or no grant on pgmq's sequences | The queue migration below |
 | `succeeded` and `1 row` in `cron.job_run_details` while nothing happened | `net.http_post` only queues the request. `net._http_response` has `Could not connect to server` | Queue a pgmq message instead ([Replace scheduled actions](https://docs.gadget.dev/guides/moving-to-another-platform/supabase#replace-scheduled-actions)) |
@@ -70,7 +70,6 @@ order by c.relname;
 | `Email not confirmed` | Imported without `email_confirm` | `email_confirm: true` for users Gadget let sign in |
 | `Invalid login credentials` for an imported user with the right password | The hash went in `password`, so it became the password | `password_hash` |
 | `Error creating user` (500) | `password_hash` isn't a bcrypt hash, such as the whole `password` object | `user.password?.hash` |
-| `Email address not authorized` | The built-in email service sends only to your organization's members (from Supabase's docs) | Custom SMTP ([Move app users](https://docs.gadget.dev/guides/moving-to-another-platform/supabase#move-app-users-and-sessions)) |
 | `Target: local stack (127.0.0.1:54322)`, then `connect ECONNREFUSED` | `supabase db push` without `--remote` on CLI 3 | `supabase db push --remote` |
 | `cannot execute INSERT in a read-only transaction` | The disk filled, and Supabase made the database read-only (from Supabase's docs) | Turn the Spend Cap off and raise the disk before the load ([Load your records](https://docs.gadget.dev/guides/moving-to-another-platform/supabase#load-your-records)) |
 
@@ -297,4 +296,4 @@ The order in [cutover.md](../cutover.md) and the guide's [cutover section](https
 
 ## What wasn't verified
 
-Run on the Supabase CLI 3.1.0 local stack in November 2026: Postgres image `17.11.0.018`, Supavisor 2.10.0, GoTrue v2.197.0, PostgREST, storage-api v1.90.1, pgmq 1.5.1, pg_cron 1.6.4, pg_net, supabase-js 2.119.0, and Prisma 6.19.3. The migration set, the exposure query, the role password script, the worker and its shutdown, and the import check run in `tests/gadget-migration/platforms-supabase`. Every failure signature was reproduced there except the two marked "from Supabase's docs" (the read-only text is Postgres's own, seen with `default_transaction_read_only`), and `connect ENETUNREACH`, which came from a Docker container with no IPv6. Not checked, because they need a hosted project: whether hosted Supavisor prints the same `ENOIDENTIFIER`, `ENOTFOUND`, and `EAUTHQUERY` text as 2.10.0, IPv6-only DNS, the Spend Cap and disk growth, read-only mode, a restored backup dropping role passwords (seen only after `supabase db reset`), `log_statement` on hosted projects, the Security Advisor, dashboard paths, Edge Function limits and egress, Realtime, and cron jobs running on preview branches. Those come from the guide and its fact-check.
+Run on the Supabase CLI 3.1.0 local stack in November 2026: Postgres image `17.11.0.018`, Supavisor 2.10.0, GoTrue v2.197.0, PostgREST, storage-api v1.90.1, pgmq 1.5.1, pg_cron 1.6.4, pg_net, supabase-js 2.119.0, and Prisma 6.19.3. The migration set, the exposure query, the role password script, the worker and its shutdown, and the import check run in `tests/gadget-migration/platforms-supabase`. Every failure signature was reproduced there except the one marked "from Supabase's docs" (its text is Postgres's own, seen with `default_transaction_read_only`), and `connect ENETUNREACH`, which came from a Docker container with no IPv6. Not checked, because they need a hosted project: whether hosted Supavisor prints the same `ENOIDENTIFIER`, `ENOTFOUND`, and `EAUTHQUERY` text as 2.10.0, IPv6-only DNS, the Spend Cap and disk growth, read-only mode, a restored backup dropping role passwords (seen only after `supabase db reset`), `log_statement` on hosted projects, dashboard paths, Edge Function limits and egress, Realtime, and cron jobs running on preview branches. Those come from the guide and its fact-check.

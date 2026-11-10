@@ -4,6 +4,8 @@
 
 Render runs the web server, a background worker, cron jobs, Postgres, and Key Value (a Redis-compatible store) as services, described in one `render.yaml` Blueprint. Most of what goes wrong is in that file: a Key Value that deletes queued jobs, a worker that never hears `SIGTERM`, and migrations sent through the connection pool. Gadget's guide: https://docs.gadget.dev/guides/moving-to-another-platform/render
 
+For Render itself (Blueprint syntax, the CLI, service types), load Render's `render-deploy` skill, and `render-blueprints` when you edit `render.yaml`: `render skills install` with Render CLI 2.10 or later, or `npx skills add render-oss/skills` (https://github.com/render-oss/skills). This file covers only what breaks or changes because the app came from Gadget.
+
 Read [common.md](common.md) first.
 
 ## Checks to run
@@ -29,7 +31,7 @@ node path/to/skills/gadget-migration/scripts/preflight.ts path/to/new-app --plat
 | `render/free-plan`, `render/disk` | Free plans in production, and a persistent disk used as file storage | |
 | `render/cron-job` | Every cron job: it runs from the moment a sync creates it | Add it in the cutover step only |
 | `render/workflows-start` | `startTask` called outside a rate-limited queue job, so a burst over the plan's limit gets `429` errors nothing retries | Copy the slug from the task's page in the dashboard |
-| `render/blueprint-unreadable` | A `render.yaml` the script can't parse | Validate it against Render's schema, as in [Complete examples](#complete-examples) |
+| `render/blueprint-unreadable` | A `render.yaml` the script can't parse | Validate it as `render-blueprints` describes, or against the JSON schema at https://render.com/schema/render.yaml.json, which needs no login |
 
 Three checks need Render itself:
 
@@ -51,15 +53,12 @@ Three checks need Render itself:
 
 ## Complete examples
 
-### A Blueprint with production, staging, and previews
+### A Blueprint with production and staging
 
-The guide's Blueprint has production only. This one adds a staging environment with its own database, Key Value, and Shopify app, and preview settings. It validates against Render's JSON schema, which you can run without a Render login: `npx ajv-cli@5.0.0 validate --spec=draft2020 --strict=false -s render.yaml.json -d render.yaml` prints `render.yaml valid` after `curl -o render.yaml.json https://render.com/schema/render.yaml.json`. `render blueprints validate render.yaml` needs `render login`.
+The guide's Blueprint has production only. This one adds a staging environment with its own database, Key Value, and Shopify app. Validate it as `render-blueprints` describes; the JSON schema at https://render.com/schema/render.yaml.json needs no login.
 
 ```yaml
 # in render.yaml
-# a pull request whose title includes [render preview] gets a preview environment, on Pro and higher
-previews:
-  generation: manual
 projects:
   - name: my-app
     environments:
@@ -86,7 +85,6 @@ projects:
             preDeployCommand: npx prisma migrate deploy
             autoDeployTrigger: checksPass
             domains: [app.example.com]
-            previews: { plan: 0.5c-512mb, numInstances: 1 }
             envVars:
               # migrations run as the default user, which owns the tables
               - key: DIRECT_DATABASE_URL
@@ -124,7 +122,6 @@ projects:
             name: my-app-queue
             region: oregon
             plan: 1g
-            previewPlan: 256mb
             # a full instance fails new adds instead of deleting queued jobs
             maxmemoryPolicy: noeviction
             ipAllowList: []
@@ -134,8 +131,6 @@ projects:
             plan: 1c-4g
             # room for every model and its indexes before the load; storage never shrinks
             diskSizeGB: 100
-            previewPlan: 0.1c-256mb
-            previewDiskSizeGB: 5
             connectionPool: pgbouncer
             ipAllowList: []
       - name: staging
@@ -190,7 +185,7 @@ projects:
             ipAllowList: []
 ```
 
-The Dockerfile needs `RUN npx prisma generate` after `COPY . .`, because `npm run start` skips the template's `docker-start` ([common.md](common.md)). The app's own role is the one the guide's [Set up development and deploys](https://docs.gadget.dev/guides/moving-to-another-platform/render#set-up-development-and-deploys) creates; test it through the pool on staging, because Render doesn't say whether its pool accepts roles you create. Hobby workspaces get 2 environments per project, so this file fits, but previews need Pro.
+The Dockerfile needs `RUN npx prisma generate` after `COPY . .`, because `npm run start` skips the template's `docker-start` ([common.md](common.md)). The app's own role is the one the guide's [Set up development and deploys](https://docs.gadget.dev/guides/moving-to-another-platform/render#set-up-development-and-deploys) creates; test it through the pool on staging, because Render doesn't say whether its pool accepts roles you create. Hobby workspaces get 2 environments per project, so this file fits.
 
 ### Start Workflows runs under the start limit
 
@@ -260,4 +255,4 @@ The order in [cutover.md](../cutover.md) holds. On Render, per [Cut over to the 
 
 Run locally: the Blueprint above against https://render.com/schema/render.yaml.json (fetched 10 November 2026) with Ajv 8.17.1, and through `preflight.ts`; the Workflows starter against a stand-in for Render's API with `@renderinc/sdk` 1.8.0 and BullMQ 6.7.3, typechecked with TypeScript 5.9.3; `allkeys-lru` and `noeviction` with BullMQ on `valkey/valkey:8` (8.1.11), the major version Render runs; a job stalled by two worker kills; `setGlobalConcurrency` across two workers; the `P1002` lock left by `prisma migrate deploy` (Prisma 6.19.3) through PgBouncer 1.25.2 in transaction mode, and the `P2021` error on an unmigrated database.
 
-Not run, because they need a Render account: `render blueprints validate`, a Blueprint sync, the `render` CLI commands above (their flags come from `render --help` in CLI 2.36.0), Render's PgBouncer (its version is unpublished, so whether it keeps prepared statements and Migrate's lock the way 1.25.2 does is unknown), how preview environments treat a Blueprint with several project environments, the exact `429` body from Render's start limit, and whether Render runs `dockerCommand` through a shell, which decides whether `SIGTERM` reaches npm at all. pnpm not passing `SIGTERM` on is the Railway guide's test, not this file's. Deploy timing (60 seconds of overlap, then `SIGTERM`), the start limits, the rollback behavior, and that roles made with `create role` work come from Render's docs and the guide's fact-check, not a test.
+Not run, because they need a Render account: `render blueprints validate`, a Blueprint sync, the `render` CLI commands above (their flags come from `render --help` in CLI 2.36.0), Render's PgBouncer (its version is unpublished, so whether it keeps prepared statements and Migrate's lock the way 1.25.2 does is unknown), the exact `429` body from Render's start limit, and whether Render runs `dockerCommand` through a shell, which decides whether `SIGTERM` reaches npm at all. pnpm not passing `SIGTERM` on is the Railway guide's test, not this file's. Deploy timing (60 seconds of overlap, then `SIGTERM`), the start limits, the rollback behavior, and that roles made with `create role` work come from Render's docs and the guide's fact-check, not a test.

@@ -2,7 +2,11 @@
 
 ## What is this?
 
-Hookdeck receives Shopify's webhooks, answers Shopify, and delivers each one to your app with retries, so the app's route can do the work before it responds. Gadget's guide has the setup: https://docs.gadget.dev/guides/moving-to-another-platform/hookdeck. Read [common.md](common.md) first. [shopify-webhooks.md](../shopify-webhooks.md) covers the Shopify source, path forwarding, the retry and deduplicate rules, and both signature checks; this file adds checks, failure signatures, and the code for moving stores one at a time, delivery groups, and the `processed_webhook` cleanup.
+Hookdeck receives Shopify's webhooks, answers Shopify, and delivers each one to your app with retries, so the app's route can do the work before it responds. Gadget's guide has the setup: https://docs.gadget.dev/guides/moving-to-another-platform/hookdeck.
+
+For Hookdeck itself (the CLI, sources, connections, rules, replay), load Hookdeck's `event-gateway` skill, and `shopify-webhooks` for the HMAC check: `npx skills add hookdeck/agent-skills --skill event-gateway` (https://github.com/hookdeck/agent-skills) and `npx skills add hookdeck/webhook-skills --skill shopify-webhooks` (https://github.com/hookdeck/webhook-skills). This file covers only what breaks or changes because the app came from Gadget.
+
+Read [common.md](common.md) first. [shopify-webhooks.md](../shopify-webhooks.md) covers the Shopify source, path forwarding, the retry and deduplicate rules, and both signature checks; this file adds checks, failure signatures, and the code for moving stores one at a time, delivery groups, and the `processed_webhook` cleanup.
 
 ## Checks to run
 

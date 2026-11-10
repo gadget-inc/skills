@@ -2,7 +2,11 @@
 
 ## What is this?
 
-Trigger.dev is a hosted queue that builds your tasks into a container and runs them on its own machines, so it replaces background actions and scheduled actions, and the host's request timeout no longer applies. Gadget's guide covers the setup and each option: https://docs.gadget.dev/guides/moving-to-another-platform/trigger-dev. Read [common.md](common.md) first, and [background-jobs.md](../background-jobs.md) for the option-by-option map from `api.enqueue`.
+Trigger.dev is a hosted queue that builds your tasks into a container and runs them on its own machines, so it replaces background actions and scheduled actions, and the host's request timeout no longer applies. Gadget's guide covers the setup and each option: https://docs.gadget.dev/guides/moving-to-another-platform/trigger-dev.
+
+For Trigger.dev itself (project setup, writing tasks, queues, schedules), load Trigger.dev's skills: `npx trigger.dev@latest skills` (installs `trigger-getting-started` and `trigger-authoring-tasks`, pinned to your SDK version), or `npx skills add triggerdotdev/skills` (the same guides as `trigger-setup` and `trigger-tasks`) (https://github.com/triggerdotdev/skills). Neither covers deploys, so this file does. This file covers only what breaks or changes because the app came from Gadget.
+
+Read [common.md](common.md) first, and [background-jobs.md](../background-jobs.md) for the option-by-option map from `api.enqueue`.
 
 ## Checks to run
 
@@ -41,11 +45,8 @@ What the script can't see:
 | You see | Cause | Fix |
 |---|---|---|
 | `ERROR: Version mismatch detected while running in CI. This won't end well. Aborting.`, then `CLI version: 4.8.4` and `- @trigger.dev/sdk@4.8.3`. Outside CI: `X Error: Your @trigger.dev packages don't match the CLI version (4.8.4).` | `npx trigger.dev@latest deploy` after a new CLI shipped | Run the CLI version your packages pin, such as `npx trigger.dev@4.8.3 deploy`, or add `trigger.dev` to `devDependencies` at the SDK's version (`trigger-dev/cli-latest`, [Deploy tasks](https://docs.gadget.dev/guides/moving-to-another-platform/trigger-dev#deploy-tasks)) |
-| `ApiClientMissingError: You need to set the TRIGGER_SECRET_KEY environment variable.` | The service that triggers has no `TRIGGER_SECRET_KEY` | Set the environment's secret key on every service that triggers |
 | `Property 'maxDuration' is missing in type` from `tsc` on `trigger.config.ts` | No `maxDuration` | Set it above your longest action, such as `900` for Gadget's 15-minute maximum |
 | `MAX_DURATION_EXCEEDED`, status **Timed out** | An attempt ran longer than `maxDuration`. `onFailure` doesn't run | Raise `maxDuration`, or split the task ([Check your host's time limits](https://docs.gadget.dev/guides/moving-to-another-platform/trigger-dev#check-your-host-s-time-limits)) |
-| `TASK_RUN_STALLED_EXECUTING` | No heartbeat for 5 minutes: a loop that never awaits, or `trigger.dev dev` stopped with Ctrl+C mid-run | `await heartbeats.yield()` inside the loop |
-| `TASK_PROCESS_OOM_KILLED`, status **Crashed**, no retry | The run used more memory than its machine, 0.5 GB on `small-1x` | Set `machine: "medium-1x"` or `retry.outOfMemory` |
 | A run stays `QUEUED` and never starts | Triggered with another environment's key, or a negative `priority` on an empty queue | Use the environment's key; pass `0` for `low`. A run with no priority counts as 0, so `default` needs `300` |
 | A second trigger with the same `idempotencyKey` starts a new run | The first run failed, which clears the key, or the TTL ran out | Expected. Gadget kept a failed job's id for 7 days, so make the job safe to run twice |
 | Two tasks on one shared limit run 8 jobs for one store at once | A named `concurrencyLimit()` that isn't enforced, as on self-hosted 4.8.3 | Share a `queue({ concurrencyLimit })`, as below |
@@ -294,6 +295,6 @@ The order in [cutover.md](../cutover.md) and the guide's [Cut over to the new pl
 
 ## What wasn't verified
 
-Every TypeScript block typechecks with `@trigger.dev/sdk` and `@trigger.dev/build` 4.8.3 and TypeScript 5.9.3. `enqueue`, the two scripts, and `check-trigger-env.ts` ran against a local stand-in for Trigger.dev's API, which checked the requests the SDK sends: `concurrencyKey`, `priority`, `delay`, and an `idempotencyKeyTTL` that outlasts the delay. The version mismatch and missing-key errors were reproduced with the 4.8.3 and 4.8.4 CLIs and SDK.
+Every TypeScript block typechecks with `@trigger.dev/sdk` and `@trigger.dev/build` 4.8.3 and TypeScript 5.9.3. `enqueue`, the two scripts, and `check-trigger-env.ts` ran against a local stand-in for Trigger.dev's API, which checked the requests the SDK sends: `concurrencyKey`, `priority`, `delay`, and an `idempotencyKeyTTL` that outlasts the delay. The version mismatch error was reproduced with the 4.8.3 and 4.8.4 CLIs and SDK.
 
 Not run here: a real Trigger.dev instance, cloud or self-hosted, so the queue's per-store limit, priority, retries, schedules, `syncEnvVars`, `prismaExtension`, and the run statuses come from the guide's measurements on self-hosted 4.8.3 and from Trigger.dev's docs. Whether the server treats a schedule with no declarative `cron` as idle until `schedules.create` comes from the [scheduled tasks](https://trigger.dev/docs/tasks/scheduled) page, and which key types the schedules and environment variable endpoints accept wasn't checked. The Prisma row is Prisma's own message for a client that was never generated, not one seen from a deployed task.

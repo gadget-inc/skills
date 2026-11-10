@@ -98,6 +98,8 @@ describe("Fly.io checks", () => {
   it("reads the Dockerfile [build] dockerfile names, not the template's Dockerfile next to it", () => {
     const files: Record<string, string> = {};
     for (const b of platformBlocks("fly-io.md")) files[b.path] = b.code;
+    // staging is a copy of fly.toml under another app name, as fly-io.md describes
+    files["fly.staging.toml"] = files["fly.toml"].replace('app = "my-app"', 'app = "my-app-staging"');
     for (const config of ["fly.toml", "fly.staging.toml"]) files[config] = files[config].replace("[build.args]", '[build]\n  dockerfile = "Dockerfile.fly"\n[build.args]');
     files["Dockerfile.fly"] = files["Dockerfile"];
     // the template's own Dockerfile: no ARG, no Supercronic, no prisma generate
@@ -109,7 +111,7 @@ describe("Fly.io checks", () => {
       // and a config without [build] dockerfile still reads the template's Dockerfile
       writeFileSync(join(dir, "fly.staging.toml"), files["fly.staging.toml"].replace('  dockerfile = "Dockerfile.fly"\n', ""));
       const found = own(preflight(dir, ["fly-io"]).findings);
-      assert.deepEqual(where(found), ["fly-io/build-arg-unused fly.staging.toml:10", "fly-io/prisma-generate fly.staging.toml:24", "fly-io/supercronic-missing fly.staging.toml:27"]);
+      assert.deepEqual(where(found), ["fly-io/build-arg-unused fly.staging.toml:14", "fly-io/prisma-generate fly.staging.toml:30", "fly-io/supercronic-missing fly.staging.toml:34"]);
       assert.match(found.find((f) => f.id === "fly-io/build-arg-unused")!.message, /but Dockerfile has no ARG/);
     } finally {
       rmSync(dir, { recursive: true, force: true });

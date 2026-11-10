@@ -4,6 +4,8 @@
 
 Vercel runs each route of the app as a Vercel Function, with Schedules for scheduled actions and a Marketplace database such as Neon. Background actions go to a queue from the Marketplace, such as Inngest, because Vercel Queues and Workflows don't attach to a React Router app. Gadget's guide: https://docs.gadget.dev/guides/moving-to-another-platform/vercel
 
+For Vercel itself (the CLI, linking, environment variables, deploys), load Vercel's plugin, which includes the `vercel-schedules` and `vercel-functions` skills this file builds on: `npx plugins add vercel/vercel-plugin` (https://github.com/vercel/vercel-plugin). This file covers only what breaks or changes because the app came from Gadget.
+
 Read [common.md](common.md) first. For Inngest itself, read [inngest.md](inngest.md).
 
 ## Checks to run
@@ -44,7 +46,6 @@ Three more that the script can't see:
 | `413` with `FUNCTION_PAYLOAD_TOO_LARGE` | An upload over 4.5MB sent to a function | Upload from the browser to storage ([File storage](https://docs.gadget.dev/guides/moving-to-another-platform/vercel#file-storage)) |
 | `FATAL: remaining connection slots are reserved` | The app connects with `DATABASE_URL_UNPOOLED`, or idle `pg` pools pile up. A 0.25 CU Neon compute gives you 105 connections | `DATABASE_URL` in the app, and `attachDatabasePool` for your own pools ([Use a connection pooler](https://docs.gadget.dev/guides/moving-to-another-platform/vercel#use-a-connection-pooler)) |
 | `Datasource "db": PostgreSQL database "neondb", schema "public" at "<production host>"` in a Preview build's log | The preview build's `prisma migrate deploy` ran against production, because Preview shares Production's `DATABASE_URL` | Neon's preview branching ([Map your models to database tables](https://docs.gadget.dev/guides/moving-to-another-platform/vercel#map-your-models-to-database-tables)) |
-| `! The environment argument is deprecated. Use --environment.` | `vercel env add NAME production` | `vercel env add NAME --environment production --sensitive` |
 | A nightly job ran twice, both runs with the same `metadata.executionId` | Vercel delivered one run twice, which Schedules allow | Save each execution id in a unique column and skip repeats, as below |
 
 ## Complete examples
@@ -69,33 +70,7 @@ The route for each path is the guide's [schedule route](https://docs.gadget.dev/
 
 ### `vercel.json` for Next.js
 
-Next.js routes do take `functions` settings, and a schedule can target a function privately, so its route needs no `CRON_SECRET`. A function target uses the function's output path, `api/schedules/prune-audit-logs`, not the file name:
-
-```json
-// in vercel.json
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "regions": ["iad1"],
-  "functions": {
-    "app/api/inngest/route.ts": { "maxDuration": 800 },
-    "app/api/schedules/prune-audit-logs/route.ts": { "maxDuration": 300, "experimentalTriggers": [{ "type": "schedule/v1beta" }] }
-  },
-  "schedules": {
-    "prune-audit-logs": { "schedule": "0 2 * * *", "timezone": "UTC", "function": "api/schedules/prune-audit-logs" }
-  }
-}
-```
-
-```typescript
-// in app/api/schedules/prune-audit-logs/route.ts
-import { handleSchedule } from "@vercel/schedules";
-import { pruneAuditLogs } from "../../../services/audit-logs.server";
-
-// the schedule/v1beta trigger makes this function private: only the scheduler can call it
-export const POST = handleSchedule(async (metadata) => {
-  await pruneAuditLogs(metadata.executionId);
-});
-```
+Next.js routes do take `functions` settings. A schedule can target a function privately by its output path, `api/schedules/prune-audit-logs`, not the file name, so its route needs no `CRON_SECRET`; see `vercel-schedules`.
 
 ### The scheduled work, safe to run twice or at once
 
@@ -150,6 +125,6 @@ The order in [cutover.md](../cutover.md) and the guide's [Cut over to the new pl
 
 ## What wasn't verified
 
-Run with Vercel CLI 65.14.0 and `@vercel/react-router` 1.3.7 on Shopify's React Router template, offline with a hand-written `.vercel/project.json`: `vercel build` with both `vercel.json` files (the Next.js one on Next.js 16.4.6), the `unused_function` error, the `405` from a `loader`-only schedule route, and the `vercel env add` warning. The schedule service ran with Prisma 6.19.3 through PgBouncer 1.25.2 in transaction mode, and the TypeScript blocks typecheck. The `P2028` text and the `Datasource` line come from Prisma against local Postgres.
+Run with Vercel CLI 65.14.0 and `@vercel/react-router` 1.3.7 on Shopify's React Router template, offline with a hand-written `.vercel/project.json`: `vercel build` with the React Router `vercel.json`, the `unused_function` error, and the `405` from a `loader`-only schedule route. The schedule service ran with Prisma 6.19.3 through PgBouncer 1.25.2 in transaction mode, and the TypeScript blocks typecheck. The `P2028` text and the `Datasource` line come from Prisma against local Postgres.
 
 Nothing ran on a Vercel account, so these come from Vercel's and Neon's documentation and the guide's fact-check: Deployment Protection's response to Shopify and to Inngest, whether a custom environment's domain can be a Deployment Protection Exception, schedule delivery and duplicate runs, `504 FUNCTION_INVOCATION_TIMEOUT`, `413 FUNCTION_PAYLOAD_TOO_LARGE`, Neon's connection numbers, the ASN of Static IPs, and what `vercel env ls` prints for a database shared by Production and Preview.

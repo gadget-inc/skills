@@ -4,6 +4,8 @@
 
 A Fly.io app is a set of Machines, small VMs that run your Docker image, configured by a `fly.toml` with one process group per command: `web`, `worker`, and `cron`. Most of what goes wrong is a `fly.toml` default (`SIGINT`, a 5-second drain, Machines that stop when idle) or a command Fly.io runs for you (`fly launch`). Gadget's guide: https://docs.gadget.dev/guides/moving-to-another-platform/fly-io
 
+For Fly.io itself (flyctl, `fly.toml` keys, secrets, scaling, certificates), load Fly's `fly` skill: `fly skills install` with flyctl 0.5.1 or later, or `npx skills add superfly/skills` (https://github.com/superfly/skills). Don't follow its `fly launch` path on a Shopify app; the first check below says why. This file covers only what breaks or changes because the app came from Gadget.
+
 Read [common.md](common.md) first.
 
 ## Checks to run
@@ -12,12 +14,7 @@ Read [common.md](common.md) first.
 node path/to/skills/gadget-migration/scripts/preflight.ts path/to/new-app --platform fly-io
 ```
 
-It reads every `fly.toml` and `fly.<name>.toml` at the root. Then validate each config with flyctl. It asks for a login, but `config validate` never calls the API, so without an account any token value works, such as `FLY_API_TOKEN=offline`:
-
-```bash
-fly config validate --strict -c fly.toml
-fly config validate --strict -c fly.staging.toml
-```
+It reads every `fly.toml` and `fly.<name>.toml` at the root. Validate each config with `fly config validate --strict -c <file>`; it runs offline with `FLY_API_TOKEN=offline`. See the `fly` skill.
 
 | Check | What it catches | Command when the script can't see it |
 |---|---|---|
@@ -56,12 +53,9 @@ fly config validate --strict -c fly.staging.toml
 | `job stalled more than allowable limit` after two deploys during a long job | `kill_timeout` is 300 seconds at most, and best effort | Split the job, or run it on [a Machine of its own](https://docs.gadget.dev/guides/moving-to-another-platform/fly-io#run-long-actions-on-machines-of-their-own) |
 | Every scheduled job runs twice in the same minute | Supercronic runs in a group with `[http_service]`, which gets 2 Machines | A `cron` group of its own |
 | The first webhook after a quiet night fails, then Shopify's retry succeeds | `auto_stop_machines = "stop"`, as `fly launch` writes it | `auto_stop_machines = "off"` ([Receive webhooks](https://docs.gadget.dev/guides/moving-to-another-platform/fly-io#receive-webhooks)) |
-| `app my-app already has DATABASE_URL set. Use 'fly secrets unset DATABASE_URL' to remove it first` | `fly mpg attach` after a restore or a second attach | `fly secrets unset DATABASE_URL --stage`, then attach ([Restore from a backup](https://docs.gadget.dev/guides/moving-to-another-platform/fly-io#restore-from-a-backup)) |
 | `app my-app-staging is in organization my-app-staging, but cluster <id> is in organization my-app-production. They must be in the same organization to attach` | A `fly mpg fork` of production, attached from a staging organization | Copy the data with `pg_dump` through `fly mpg proxy` ([Environments](https://docs.gadget.dev/guides/moving-to-another-platform/fly-io#environments)) |
-| `A ... bucket named ... already exists for app my-app` from `fly storage create` | One Tigris bucket per app; a `fly.toml` in the directory makes flyctl use that app even with `--org` | Run `fly storage create --public --org <org>` from a directory without a `fly.toml` |
 | `Warning: Your app has 70 machines in region iad but only 1 egress IPv4(s). You need at least 1 more to cover all machines.` | Each static egress pair serves 64 Machines in a region | `fly ips allocate-egress --region iad` again |
 | `Service has no processes set but app has 3 processes defined` | `[http_service]` without `processes = ["web"]` | Add it |
-| `Strict validation found unrecognised sections or keys:` | A misspelled or misplaced key, which Fly.io otherwise ignores | Fix the key it names |
 | Occasional `ECONNRESET` on queries | Fly.io's proxy closes connections older than 10 minutes when it restarts | Pool lifetime 600 seconds, idle timeout 300 ([Connect through PgBouncer](https://docs.gadget.dev/guides/moving-to-another-platform/fly-io#connect-through-pgbouncer)) |
 
 ## Complete examples
@@ -131,54 +125,15 @@ kill_timeout = 300
   memory = "256mb"
 ```
 
-```toml
-# in fly.staging.toml
-# staging: fly deploy --config fly.staging.toml, in its own organization with its own database and Shopify app
-app = "my-app-staging"
-primary_region = "iad"
-kill_signal = "SIGTERM"
-kill_timeout = 300
+`fly.staging.toml` is a copy of `fly.toml`, deployed with `fly deploy --config fly.staging.toml` in the staging organization. It differs in five places:
 
-[build.args]
-  VITE_APP_ENV = "staging"
+- `app = "my-app-staging"`.
+- `VITE_APP_ENV = "staging"` under `[build.args]`.
+- The `[env]` values: `APP_ENV = "staging"`, `SHOPIFY_APP_URL = "https://my-app-staging.fly.dev"`, and the staging Shopify app's `SHOPIFY_API_KEY`.
+- The `cron` group is there from day one, because staging's scheduler runs against staging's database.
+- One `[[vm]]` with no `processes` line and `memory = "512mb"`, shared by every group.
 
-[deploy]
-  release_command = "npx prisma migrate deploy"
-  release_command_timeout = "15m"
-
-[env]
-  APP_ENV = "staging"
-  PORT = "3000"
-  SHOPIFY_APP_URL = "https://my-app-staging.fly.dev"
-  SHOPIFY_API_KEY = "staging-client-id"
-  SCOPES = "write_products"
-
-[processes]
-  web = "npm run start"
-  worker = "node build/worker.js"
-  # staging's scheduler runs against staging's database, so it can start on day one
-  cron = "supercronic /app/crontab"
-
-[http_service]
-  processes = ["web"]
-  internal_port = 3000
-  force_https = true
-  # staging tests webhook timing too, so it doesn't stop Machines either
-  auto_stop_machines = "off"
-  auto_start_machines = true
-
-  [[http_service.checks]]
-    grace_period = "10s"
-    interval = "15s"
-    timeout = "5s"
-    method = "GET"
-    path = "/healthz"
-
-[[vm]]
-  cpu_kind = "shared"
-  cpus = 1
-  memory = "512mb"
-```
+Everything else stays the same, including `auto_stop_machines = "off"`, so staging tests webhook timing too.
 
 The template's Dockerfile with what the process groups need. Supercronic is checked against the SHA-256 that its v0.2.51 release publishes, for the architecture Docker builds (Fly.io's builders are amd64; a local build on Apple silicon is arm64):
 
@@ -291,9 +246,9 @@ The order in [cutover.md](../cutover.md) and the guide's [cutover section](https
 
 No Fly.io account was used, so nothing was deployed, and the commands in the checks table that talk to Fly.io (`fly ssh console`, `fly redis status`, `fly ips list`, `fly scale show`) weren't run. Run locally on 10 November 2026:
 
-- Both `fly.toml` files pass `fly config validate --strict` with flyctl 0.5.7 and a fake token, which runs flyctl's own validation without the API. The validation errors in the failure table are flyctl's output from that run.
+- `fly.toml` passes `fly config validate --strict` with flyctl 0.5.7 and a fake token, which runs flyctl's own validation without the API. The `Service has no processes set` error in the failure table is flyctl's output from that run.
 - The Dockerfile, crontab, and `build:worker` script were built with Docker on `node:22-alpine` (arm64), and `supercronic -test` passed on the crontab, with and without a `CRON_TZ` line. Without `tzdata`, `supercronic -test` printed `unknown time zone`. The amd64 Supercronic download was built under emulation; Fly.io's remote builders weren't tried.
 - With the tests in `tests/gadget-migration/platforms-fly-io`: a web server with common.md's queue module was still running 5 seconds after `SIGTERM`, and exited in about 230 ms with common.md's handler, but not on `SIGINT`. A worker under `npm run` that only handles `SIGTERM` died at once on `SIGINT`. ioredis 5.8.1 failed with `getaddrinfo ENOTFOUND` on an IPv6-only Docker network, not Upstash, and connected with `family: 6`.
 - The `P2021` error and the rollback's `release_command` came from Prisma 6.19.3 on Postgres 18.6.
 
-From flyctl's source at the same commit, not run against the API: that `release_command` runs on the deployed image, the `fly mpg attach` errors, the egress warning, `fly storage create` refusing a second bucket, and `fly launch` rewriting `shopify.app.toml` (in `@flydotio/dockerfile` 0.7.15, `fly.js`). From Fly.io's docs and the guide's fact-check only: the Writer role's grants and whether it bypasses row-level security, the 5-second default and 300-second maximum for `kill_timeout`, that `[env]` names can't start with `FLY_`, and the 64 Machines per egress pair.
+From flyctl's source at the same commit, not run against the API: that `release_command` runs on the deployed image, the `fly mpg attach` error, the egress warning, and `fly launch` rewriting `shopify.app.toml` (in `@flydotio/dockerfile` 0.7.15, `fly.js`). From Fly.io's docs and the guide's fact-check only: the Writer role's grants and whether it bypasses row-level security, the 5-second default and 300-second maximum for `kill_timeout`, that `[env]` names can't start with `FLY_`, and the 64 Machines per egress pair.

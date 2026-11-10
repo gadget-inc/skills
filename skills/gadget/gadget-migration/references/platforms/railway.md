@@ -4,6 +4,8 @@
 
 Railway runs each part of the app as a service in a project with one or more environments, described in `.railway/railway.ts`. Its defaults are the trap: 0 seconds of draining on every deploy, a Redis that saves a snapshot once a minute at most, and a Postgres user that skips row-level security. Gadget's guide: https://docs.gadget.dev/guides/moving-to-another-platform/railway
 
+For Railway itself (the CLI, `.railway/railway.ts` syntax, variables, domains), load Railway's `use-railway` skill: `railway skills install`, or `npx skills add railwayapp/railway-skills` (https://github.com/railwayapp/railway-skills). This file covers only what breaks or changes because the app came from Gadget.
+
 Read [common.md](common.md) first.
 
 ## Checks to run
@@ -43,7 +45,6 @@ Run `db-check.sql` through the URL the app uses, as [common.md](common.md) says.
 | `SKIPPED` for every run in `railway cron list` | One run never exited, usually an open Redis or database connection, and Railway never stops it | Close connections at the end of the script, then stop the stuck run |
 | `502 Bad Gateway` on the first webhook after a quiet period | Serverless put the web service to sleep | Turn Serverless off ([Receive webhooks](https://docs.gadget.dev/guides/moving-to-another-platform/railway#receive-webhooks)) |
 | `Signature version 4 presigned URLs must have an expiration date less than one week in the future` | `expiresIn` over 604800 seconds. Railway allows 90 days, the AWS SDK 7 | Sign for 7 days or less, and store a redirect route's URL, as below |
-| A custom domain answers `404` after its `CNAME` resolves | No `TXT` record proving you own the domain | Add the `TXT` record from the domain's settings ([Email and custom domains](https://docs.gadget.dev/guides/moving-to-another-platform/railway#email-and-custom-domains)) |
 
 ## Complete examples
 
@@ -205,4 +206,4 @@ The order in [cutover.md](../cutover.md) holds. On Railway, per [Cut over to the
 
 Run locally: the project file typechecked with TypeScript 5.9.3 against `railway` 3.16.0 and evaluated for production and staging with the package's own functions; the append-only switch, its wrong order, and the way back on `redis:8.2` (8.2.11) with the template's start command and BullMQ 6.7.3; `railwayapp/redis:8.2`, the `redis()` helper's image, under `linux/amd64` emulation (`appendonly yes`, `noeviction`, no `docker-entrypoint.sh`); the bucket client and route against the AWS SDK 3.1165.0, offline; the `P1002` lock through PgBouncer 1.25.2, the version of Railway's pgbouncer image; `ENOTFOUND` for an IPv6-only name in a `node:22-slim` container; and ioredis's default `family` from 5.3.2 to 6.0.0.
 
-Not run, because they need a Railway account: `railway config plan` and `apply` (the IaC engine ships in the CLI and needs a linked project), whether a bucket's variables resolve through `ref(files, "BUCKET")`, the port Railway injects as `PORT` for a domain, whether an apply deletes a PgBouncer service or recovery bucket the file leaves out, and the CLI commands above (their flags come from `railway --help` in CLI 5.71.0). pnpm not passing `SIGTERM` on is the guide's test, not this file's. That new services ignore `railway.json`, the 90-day bucket limit, the `RAILWAY_BUCKET_NAME` warning, Hobby blocking SMTP, Serverless `502`s, and the `TXT` record come from Railway's docs and the guide's fact-check.
+Not run, because they need a Railway account: `railway config plan` and `apply` (the IaC engine ships in the CLI and needs a linked project), whether a bucket's variables resolve through `ref(files, "BUCKET")`, the port Railway injects as `PORT` for a domain, whether an apply deletes a PgBouncer service or recovery bucket the file leaves out, and the CLI commands above (their flags come from `railway --help` in CLI 5.71.0). pnpm not passing `SIGTERM` on is the guide's test, not this file's. That new services ignore `railway.json`, the 90-day bucket limit, the `RAILWAY_BUCKET_NAME` warning, Hobby blocking SMTP, and Serverless `502`s come from Railway's docs and the guide's fact-check.

@@ -1,7 +1,6 @@
 // Run with: npm test (from this folder). No account needed: the scripts in references/platforms/trigger-dev.md
 // run against a local stand-in for Trigger.dev's API, which records what @trigger.dev/sdk 4.8.3 sends.
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
@@ -37,13 +36,6 @@ describe("references/platforms/trigger-dev.md", () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "trigger.config.ts"), 'import { defineConfig } from "@trigger.dev/sdk";\nexport default defineConfig({ project: "proj_abc123", dirs: ["./app/trigger"] });\n');
     assert.throws(() => typecheck(here, [dir], { types: ["node"] }), /Property 'maxDuration' is missing in type/);
-  });
-
-  it("reproduces the missing TRIGGER_SECRET_KEY error", () => {
-    const env = { ...process.env };
-    delete env.TRIGGER_SECRET_KEY;
-    const out = execFileSync(process.execPath, ["--input-type=module", "-e", 'import { tasks } from "@trigger.dev/sdk"; try { await tasks.trigger("notify-external-system", {}); } catch (e) { console.log(`${e.name}: ${e.message}`); }'], { cwd: here, env, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-    assert.match(out, /^ApiClientMissingError: You need to set the TRIGGER_SECRET_KEY environment variable\./);
   });
 });
 

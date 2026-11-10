@@ -4,6 +4,8 @@
 
 On Google Cloud, the app becomes two Cloud Run services from one image: public `my-app-web`, and private `my-app-worker`, which Cloud Tasks, Cloud Scheduler, and Pub/Sub call with Google-signed tokens. Most failures here are a missing IAM role, a variable one service lacks, or two time limits that disagree, so this file is mostly scripts that set those up the same way in every project. Gadget's guide: https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run
 
+For Cloud Run itself (services, jobs, deploying from source, base roles), load Google's `cloud-run-basics` skill: `npx skills add google/skills` and pick it (https://github.com/google/skills/tree/main/skills/cloud/cloud-run-basics). It has no environment variables, Secret Manager, Cloud Tasks, or Cloud Scheduler, so this file carries them. This file covers only what breaks or changes because the app came from Gadget.
+
 Read [common.md](common.md) first.
 
 ## Checks to run
@@ -115,16 +117,7 @@ TASKS_SERVICE_ACCOUNT: tasks-invoker@my-app-production.iam.gserviceaccount.com
 FILES_BUCKET: my-app-production-files
 ```
 
-```yaml
-# in staging.env.yaml
-APP_ENV: staging
-SHOPIFY_APP_URL: https://my-app-web-987654321.us-central1.run.app
-SHOPIFY_API_KEY: staging-client-id
-SCOPES: write_products
-WORKER_URL: https://my-app-worker-987654321.us-central1.run.app
-TASKS_SERVICE_ACCOUNT: tasks-invoker@my-app-staging.iam.gserviceaccount.com
-FILES_BUCKET: my-app-staging-files
-```
+`staging.env.yaml` has the same keys with staging's values.
 
 The deploy, with the guide's order (one image, migrations once, worker before web) and the two traffic commands that undo a pinned rollback:
 
@@ -299,7 +292,9 @@ for (let i = 0; i < shops.length; i += 10) {
   console.log(`${Math.min(i + 10, shops.length)} of ${shops.length} stores checked`);
 }
 await prisma.$disconnect();
-``` The guide's [signed URL helpers](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#search-files-and-other-services) work as written once the IAM script has run.
+```
+
+The guide's [signed URL helpers](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#search-files-and-other-services) work as written once the IAM script has run.
 
 ## Cutover
 

@@ -2,7 +2,11 @@
 
 ## What is this?
 
-Inngest is a hosted queue that calls an endpoint in your app to run each step of a job, so it replaces background actions and scheduled actions without a worker process. Gadget's guide covers the setup and why each option maps the way it does: https://docs.gadget.dev/guides/moving-to-another-platform/inngest. Read [common.md](common.md) first, and [background-jobs.md](../background-jobs.md) for the option-by-option map from `api.enqueue`.
+Inngest is a hosted queue that calls an endpoint in your app to run each step of a job, so it replaces background actions and scheduled actions without a worker process. Gadget's guide covers the setup and why each option maps the way it does: https://docs.gadget.dev/guides/moving-to-another-platform/inngest.
+
+For Inngest itself (the SDK, keys, the serve endpoint, the Dev Server, syncs), load Inngest's `inngest-setup` skill, with `inngest-flow-control` and `inngest-durable-functions` for the options this file maps: `npx skills add inngest/inngest-skills` (https://github.com/inngest/inngest-skills). This file covers only what breaks or changes because the app came from Gadget.
+
+Read [common.md](common.md) first, and [background-jobs.md](../background-jobs.md) for the option-by-option map from `api.enqueue`.
 
 ## Checks to run
 
@@ -27,8 +31,7 @@ node path/to/skills/gadget-migration/scripts/preflight.ts path/to/new-app --plat
 
 What the script can't see:
 
-- **Every function is registered.** Locally, with the Dev Server, `curl -s http://localhost:3000/api/inngest` prints `"function_count"`. It counts each `createFunction` plus one for each `onFailure`, so 4 functions with 1 failure handler print 5. In production the endpoint answers `401` to a request Inngest didn't sign, so check the app's function list in the Inngest dashboard after the deploy's sync.
-- **Production synced after the deploy.** The app page in the Inngest dashboard shows the last sync. Sync after every deploy that changes a function, from the dashboard, a host integration, or `POST https://api.inngest.com/v2/apps/<app-id>/syncs`, as [apps and syncs](https://www.inngest.com/docs/platform-and-operations/apps-and-syncs) describes.
+- **Every function is registered, and production synced after the deploy.** The Dev Server's `function_count` counts each `createFunction` plus one for each `onFailure`, so 4 functions with 1 failure handler print 5. In production, check the app's function list in the Inngest dashboard, and sync after every deploy that changes a function, as `inngest-cli` describes.
 - **Queues two Gadget actions shared.** The inventory's `api.enqueue` section lists each call's `queue` name. Every function that replaces an action on the same queue name needs the same `scope: "env"` key, as in the complete example below. A plain `key` gives each function its own limit.
 - **The plan's step cap.** On 300 stores, a per-store limit of 2 allows 600 steps at once, above every plan's account cap on the [limits page](https://www.inngest.com/docs/durable-execution/limits). The account cap then decides throughput.
 - **Keys per environment.** Staging's host needs the staging environment's `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY`, not production's. Compare `ggt var list` with the host's variable names as [common.md](common.md#checks-to-run) says, and check each key's environment in the dashboard.
@@ -37,13 +40,8 @@ What the script can't see:
 
 | You see | Cause | Fix |
 |---|---|---|
-| `In cloud mode but no signing key found. For local dev, set the INNGEST_DEV=1 env var. For production, set the INNGEST_SIGNING_KEY env var` in the log, and `/api/inngest` answers `500 {"code":"internal_server_error"}` | No `INNGEST_SIGNING_KEY` on the service that serves functions | Set it from the dashboard ([Serve the endpoint](https://docs.gadget.dev/guides/moving-to-another-platform/inngest#serve-the-endpoint)) |
-| `Failed to send event Your event or events were not sent to Inngest. We couldn't find an event key to use to send events to Inngest.` | No `INNGEST_EVENT_KEY` on the service that sends, such as a worker or cron service | Set it on every service that calls `inngest.send` |
 | `fetch failed`, with the cause `connect ECONNREFUSED 127.0.0.1:8288` | `INNGEST_DEV=1` with no Dev Server: in production config, or locally before starting `inngest-cli dev` | Remove it from deploy config (`inngest/dev-flag-in-config`), or start the Dev Server |
-| `Signature validation failed` and `No x-inngest-signature provided`, with `401 {"message":"Unauthorized"}` | Something other than Inngest requested `/api/inngest` in production, such as a browser or health check | Expected. Point health checks at another route |
-| ``TypeError: Failed calling `url` from serve handler when testing for probe; Invalid URL`` | A test called the `inngest/remix` handler with a `Request` that has no `Host` header | Add `headers: { host: "app.example.com" }` to the test's request |
 | `Inngest API Error: 400 Event is over the max size: Max 3145728 bytes / Size 4194361 bytes` | The Dev Server's 3 MiB event limit. The Free plan's is 256 KiB | Send ids, and load records in a step |
-| `output too large: step output size is greater than the limit` in the Dev Server log, and the run is `FAILED` | A step returned more than 4 MiB | Return an id or a cursor, as `auditStoreOrders` in the guide does |
 | An event sent with `{ shopId: 123n, nested: { orderId: 5n }, list: [1n, 2] }` arrives as `{"list":[null,2],"nested":{}}` | `inngest.send` drops `bigint` fields at any depth and turns one in an array into `null` | Convert to strings first, as `toEventData` below does |
 | A job runs, but every store waits behind the busiest one | The event lacks the field the concurrency key reads, so it lands in the keyless limit | `inngest/key-field-missing`. Put `shopId` in every event |
 | `StepError [NonRetriableError]: order 1 no longer exists`, the run `FAILED` after one attempt | `NonRetriableError` thrown in a step: no retries, then `onFailure` runs once | Expected. Throw it only for errors a retry can't fix |

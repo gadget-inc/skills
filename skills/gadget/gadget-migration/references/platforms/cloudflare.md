@@ -4,6 +4,8 @@
 
 On Cloudflare the app runs as a Worker, a function Cloudflare starts for each request or event, with Postgres outside Cloudflare reached through Hyperdrive, Workflows and Queues for background actions, Cron Triggers for scheduled actions, and R2 for files. Each Wrangler environment, such as `staging`, deploys as a separate Worker with its own bindings, the objects through which a Worker reaches those services. Gadget's guide: https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare
 
+For Cloudflare itself (product choice, bindings, Wrangler commands and config), load Cloudflare's `cloudflare` and `wrangler` skills: in Claude Code, `/plugin marketplace add cloudflare/skills` then `/plugin install cloudflare@cloudflare`; elsewhere, `npx skills add https://github.com/cloudflare/skills`. That skill prefers the `cf` CLI for new projects; with this file's `wrangler.jsonc`, use Wrangler. This file covers only what breaks or changes because the app came from Gadget.
+
 Read [common.md](common.md) first.
 
 ## Checks to run
@@ -39,13 +41,11 @@ Every row was reproduced locally with Wrangler 4.160.0 and the Cloudflare Vite p
 | `duplicate key value violates unique constraint "pg_type_typname_nsp_index"` | `PostgreSQLSessionStorage` created per call on an empty database: 10 of 10 concurrent first calls failed in Node | The guide's `workerSessionStorage` |
 | `Detected an empty appUrl configuration` under `vite dev` | Every var is inside an environment and `CLOUDFLARE_ENV` isn't set | The `vite.config.ts` below |
 | OAuth and redirects go to `https://staging.example.com` while you test through the `shopify app dev` tunnel | The Worker reads its vars and `.dev.vars`, never the shell. Not even `CLOUDFLARE_INCLUDE_PROCESS_ENV=true` passes the CLI's `SHOPIFY_APP_URL` through | The `vite.config.ts` below, and the development app's secret in `.dev.vars` ([Run your app locally](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#run-your-app-locally)) |
-| `When developing locally, you should use a local Postgres connection string to emulate Hyperdrive functionality.`, or `You must provide a password - e.g. 'user:password@database.example.com:port/databasename'` | No local database for the Hyperdrive binding, or one without a password | `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://postgres:postgres@127.0.0.1:5432/my_app`, with a password |
 | `"hyperdrive" exists at the top level, but not on "env.staging".` | Environments don't inherit bindings, `vars`, or `secrets` | Repeat them in each environment |
 | `` You have specified the environment "production" via the `--env/-e` CLI argument. This does not match the target environment "staging" that was used when building the application. `` | A staging build deployed with `--env production` | `CLOUDFLARE_ENV=production react-router build`, then `wrangler deploy` with no `--env` |
 | `No bindings found.` in `wrangler deploy`'s output | A build without `CLOUDFLARE_ENV` deploys the top-level Worker, `my-app` | Build with `CLOUDFLARE_ENV` |
 | `error TS18048: 'env.HYPERDRIVE' is possibly 'undefined'.` | `wrangler types` without `--env` | `wrangler types --env production --strict-vars=false` |
 | `vite.config.ts: error TS2322: Type 'string' is not assignable to type '"https://app.example.com"'.` | `wrangler types` gave `SHOPIFY_APP_URL` its literal value, and the template's `vite.config.ts` assigns it | Add `--strict-vars=false` |
-| `Wrangler detected an AWS S3 CORS configuration format.` | A `CORSRules` file passed to `wrangler r2 bucket cors set` | The `rules` format below |
 | `403` with `SignatureDoesNotMatch` from a browser upload | The upload's `Content-Type` or size differs from what the URL signed. Reproduced against an S3-compatible server, not R2 | Send the type the server signed, from the same `File` |
 | `WorkflowTimeoutError: Execution timed out after 2000ms`, with the step's timeout in place of 2000, on every attempt | A step past its timeout, 10 minutes by default. From the guide's fact-check | Set `timeout` on the step ([Check your host's time limits](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#check-your-host-s-time-limits)) |
 

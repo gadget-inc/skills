@@ -1,4 +1,4 @@
-// Validates the fly.toml files in fly-io.md with flyctl's own validation, and typechecks the reference's
+// Validates the fly.toml in fly-io.md with flyctl's own validation, and typechecks the reference's
 // TypeScript. platforms-fly-io.test.ts runs the preflight checks on the same files.
 // flyctl needs a token but not the API for `config validate`, so any value works. Set FLYCTL to the
 // flyctl binary, or put flyctl on PATH; without it the validation test skips.
@@ -22,27 +22,21 @@ function validate(path: string) {
   });
 }
 
-describe("fly.toml files in fly-io.md", { skip }, () => {
+describe("the fly.toml in fly-io.md", { skip }, () => {
   const dir = join(here, ".typecheck", "fly-config");
   mkdirSync(dir, { recursive: true });
 
-  for (const path of ["fly.toml", "fly.staging.toml"]) {
-    it(`${path} passes fly config validate --strict`, () => {
-      writeFileSync(join(dir, path), block("fly-io.md", path));
-      const result = validate(join(dir, path));
-      assert.equal(result.status, 0, result.stdout + result.stderr);
-      assert.match(result.stdout + result.stderr, /Configuration is valid/);
-    });
-  }
+  it("passes fly config validate --strict", () => {
+    writeFileSync(join(dir, "fly.toml"), block("fly-io.md", "fly.toml"));
+    const result = validate(join(dir, "fly.toml"));
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout + result.stderr, /Configuration is valid/);
+  });
 
-  it("fails the errors the failure table quotes", () => {
+  it("fails with the error the failure table quotes", () => {
     const production = block("fly-io.md", "fly.toml");
     writeFileSync(join(dir, "no-processes.toml"), production.replace('  processes = ["web"]\n  internal_port', "  internal_port"));
     assert.match(validate(join(dir, "no-processes.toml")).stdout, /Service has no processes set but app has 3 processes defined/);
-    writeFileSync(join(dir, "typo.toml"), production.replace("kill_timeout = 300", "kill_timeout = 300\nauto_stop = true"));
-    const typo = validate(join(dir, "typo.toml"));
-    assert.notEqual(typo.status, 0);
-    assert.match(typo.stdout + typo.stderr, /Strict validation found unrecognised sections or keys:\s+- auto_stop/);
   });
 });
 

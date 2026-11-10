@@ -16,8 +16,10 @@ const skip = docker.status === 0 ? false : `needs Docker and ${IMAGE} (docker pu
 
 const dir = join(import.meta.dirname, ".typecheck", "gcloud");
 mkdirSync(join(dir, "scripts"), { recursive: true });
-// gcloud reads --env-vars-file while it parses, so the env files are checked too
-for (const path of ["scripts/gcp-iam.sh", "scripts/deploy.sh", "production.env.yaml", "staging.env.yaml"]) writeFileSync(join(dir, path), block("google-cloud-run.md", path));
+// gcloud reads --env-vars-file while it parses, so the env file is checked too
+for (const path of ["scripts/gcp-iam.sh", "scripts/deploy.sh", "production.env.yaml"]) writeFileSync(join(dir, path), block("google-cloud-run.md", path));
+// the reference gives staging.env.yaml as the same keys with staging's values
+writeFileSync(join(dir, "staging.env.yaml"), block("google-cloud-run.md", "production.env.yaml").replaceAll("production", "staging"));
 
 // Wraps gcloud: a parse error stops the run, the login error counts as a pass. "describe" calls answer
 // as missing on the first pass and as present on the second, so both branches of each script run.

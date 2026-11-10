@@ -32,20 +32,20 @@ node path/to/skills/gadget-migration/scripts/inventory.ts . > MIGRATION_INVENTOR
 8. **Move users and sign-in.** [references/users-and-auth.md](references/users-and-auth.md)
 9. **Cut over.** [references/cutover.md](references/cutover.md). Read it before step 1 as well: its "Before the day" list has work that takes days, such as Shopify's IP allowlist, the email sending domain, and the URLs other services call.
 
-Read the platform's reference alongside the steps. Each has checks to run, the errors you'll see and their fixes, and complete config and worker files, with links to Gadget's guide for that platform. Start with [references/platforms/common.md](references/platforms/common.md), which covers the pitfalls every host shares:
+Read the platform's reference alongside the steps. Each has checks to run, the errors you'll see and their fixes, and complete config and worker files, with links to Gadget's guide for that platform. Start with [references/platforms/common.md](references/platforms/common.md), which covers the pitfalls every host shares. Each vendor publishes its own skill for platform basics; load it alongside ours, which covers only what changes because the app came from Gadget:
 
-| Platform or service | Reference |
-|---|---|
-| Vercel | [references/platforms/vercel.md](references/platforms/vercel.md) |
-| Render | [references/platforms/render.md](references/platforms/render.md) |
-| Railway | [references/platforms/railway.md](references/platforms/railway.md) |
-| Fly.io | [references/platforms/fly-io.md](references/platforms/fly-io.md) |
-| Google Cloud Run, Cloud Tasks, Cloud SQL | [references/platforms/google-cloud-run.md](references/platforms/google-cloud-run.md) |
-| Supabase | [references/platforms/supabase.md](references/platforms/supabase.md) |
-| Cloudflare Workers, Hyperdrive, Workflows | [references/platforms/cloudflare.md](references/platforms/cloudflare.md) |
-| Hookdeck for Shopify webhooks | [references/platforms/hookdeck.md](references/platforms/hookdeck.md) |
-| Inngest for background jobs | [references/platforms/inngest.md](references/platforms/inngest.md) |
-| Trigger.dev for background jobs | [references/platforms/trigger-dev.md](references/platforms/trigger-dev.md) |
+| Platform or service | Reference | Vendor's skill |
+|---|---|---|
+| Vercel | [references/platforms/vercel.md](references/platforms/vercel.md) | `vercel-schedules`, `vercel-functions` in [vercel/vercel-plugin](https://github.com/vercel/vercel-plugin) |
+| Render | [references/platforms/render.md](references/platforms/render.md) | `render-deploy` in [render-oss/skills](https://github.com/render-oss/skills) |
+| Railway | [references/platforms/railway.md](references/platforms/railway.md) | `use-railway` in [railwayapp/railway-skills](https://github.com/railwayapp/railway-skills) |
+| Fly.io | [references/platforms/fly-io.md](references/platforms/fly-io.md) | `fly` in [superfly/skills](https://github.com/superfly/skills) |
+| Google Cloud Run, Cloud Tasks, Cloud SQL | [references/platforms/google-cloud-run.md](references/platforms/google-cloud-run.md) | `cloud-run-basics` in [google/skills](https://github.com/google/skills) |
+| Supabase | [references/platforms/supabase.md](references/platforms/supabase.md) | `supabase` in [supabase/agent-skills](https://github.com/supabase/agent-skills) |
+| Cloudflare Workers, Hyperdrive, Workflows | [references/platforms/cloudflare.md](references/platforms/cloudflare.md) | `cloudflare`, `wrangler` in [cloudflare/skills](https://github.com/cloudflare/skills) |
+| Hookdeck for Shopify webhooks | [references/platforms/hookdeck.md](references/platforms/hookdeck.md) | `event-gateway` in [hookdeck/agent-skills](https://github.com/hookdeck/agent-skills) |
+| Inngest for background jobs | [references/platforms/inngest.md](references/platforms/inngest.md) | `inngest-setup` in [inngest/inngest-skills](https://github.com/inngest/inngest-skills) |
+| Trigger.dev for background jobs | [references/platforms/trigger-dev.md](references/platforms/trigger-dev.md) | `trigger-setup`, `trigger-tasks` in [triggerdotdev/skills](https://github.com/triggerdotdev/skills) |
 
 Use these when the inventory lists the feature:
 
