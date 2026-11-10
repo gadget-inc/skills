@@ -9,7 +9,7 @@ Gadget stores each model's records in Postgres, but you can't connect to that da
 | Scope | One model, records matching the current search | Any model, any filter |
 | Speed | One export per environment at a time, emailed as a link valid for 3 days | 250 records per request, as fast as your rate limits allow |
 | Restartable | No | Yes, from the last cursor |
-| Good for | Small models and spot checks | Everything else |
+| Good for | Models under about 250,000 records, and spot checks | Everything else |
 
 Both count against the environment's request and database rate limits, so run large exports outside busy hours.
 
@@ -183,6 +183,8 @@ for (const record of page) {
 Store the key, file name, MIME type, and size in the new table. Public file URLs you stored elsewhere, such as in Shopify metafields or emails, should point at the new storage before you delete the Gadget app. Gadget doesn't guarantee they keep working after that.
 
 ## Export from the data editor
+
+Use the CSV export for small models only. It works reliably up to about 250,000 records, and wide records fail sooner: 500,000 `shopifyOrder` records can run the export out of memory. A failed export starts again from the first record, and when every attempt fails, no email arrives. For anything larger, use the Internal API script above. If a browser download of the file stops partway, download it again from the start, because resuming it can corrupt the file.
 
 Open the model, then **More options** > **Export to CSV**. The export includes every stored field, including hidden ones such as `shopifyShop.accessToken`, and leaves out computed fields and related models. Gadget sends no email when no records match. Values to convert on import:
 
