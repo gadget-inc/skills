@@ -278,8 +278,8 @@ function blueprintFindings(repo: Repo, doc: any): Finding[] {
           file,
           line: lineAt(sql, match.index!),
           message: `${table(match[1])} has row-level security, and the app's ${appVar} comes from fromDatabase, which connects as the database's own user. That user runs the migrations, so it owns the table and skips its policies: a query with no store set returns every store's rows.`,
-          fix: `Add alter table ${table(match[1])} force row level security; in a migration, or connect the app as a role you create with create role ... nosuperuser nobypassrls.`,
-          docs: `${DOCS}#rewrite-permissions-and-shop-tenancy`,
+          fix: `Connect the web service and worker as a role you create with create user, with grants and alter default privileges, and put its URL in a dashboard environment group. Keep DIRECT_DATABASE_URL on the default user for migrations. Forcing row-level security on ${table(match[1])} instead also applies the policies to the default user, but then data migrations and the load script fail with unrecognized configuration parameter "app.shop_id".`,
+          docs: `${GUIDE}#set-up-development-and-deploys`,
         });
       }
     }

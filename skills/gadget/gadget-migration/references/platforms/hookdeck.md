@@ -46,7 +46,7 @@ What the script can't see:
 | `TypeError: Body is unusable: Body has already been read` | The route read the body, such as with `request.json()`, before `authenticate.webhook` | Verify first, then use the payload it returns (`hookdeck/body-before-hmac`) |
 | `TypeError: unusable` from `request.clone()` | The clone came after the body was read | Clone before any read, as the guide's route does |
 | A side effect runs twice for webhooks minutes apart, with a deduplicate rule in place | The window is in seconds: `3600` is 3.6 seconds | `"window": 3600000` |
-| Failed deliveries stop retrying after a filter change | A CLI filter update replaced the rules array, dropping the retry rule | Write filters with `scripts/hookdeck.ts filters`, which keeps the other rules |
+| Failed deliveries stop retrying after a filter change | A CLI filter update replaced the rules array, dropping the retry rule | Write filters with `scripts/hookdeck.ts filters`, which keeps the other rules ([Move one store at a time](https://docs.gadget.dev/guides/moving-to-another-platform/hookdeck#move-one-store-at-a-time)) |
 | After a filter change, no webhook reaches the new app, and the requests show as discarded | The filter is a plain array of domains, which only matches a value containing all of them | `$or` of exact domains (`hookdeck/filter-syntax`) |
 | A store that hasn't moved gets webhooks in the new app | `$in` matched part of its domain | `$or` of exact domains |
 | A store's webhooks still reach Gadget after you moved it | A filter change applies only to webhooks Hookdeck receives after it | Expected. Wait with `scripts/hookdeck.ts pending` ([Move one store at a time](https://docs.gadget.dev/guides/moving-to-another-platform/hookdeck#move-one-store-at-a-time)) |

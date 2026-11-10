@@ -157,7 +157,7 @@ select cron.schedule('prune-cron-history', '30 3 * * *', $$ delete from cron.job
 
 ### Set the server role's password per environment
 
-The guide's `alter role app_server with password '...'` works, but Supabase's Postgres image runs with `log_statement = 'ddl'`, so the password lands in the Postgres log in plain text. This script sends a SCRAM verifier instead, checks that the role signs in through the pooler URL you give it, and prints the server's URL for your host's secrets. Run it in each environment, and again after `supabase db reset` or restoring a backup, which both leave the role without a password.
+The guide sets the password with `\password app_server`, which sends only a SCRAM hash, because Supabase's Postgres image logs every `alter role` statement. This script does the same without an interactive `psql`, for CI or each new environment: it sends a SCRAM verifier, checks that the role signs in through the pooler URL you give it, and prints the server's URL for your host's secrets. Run it in each environment, and again after `supabase db reset` or restoring a backup, which both leave the role without a password.
 
 ```typescript
 // in scripts/set-role-password.ts

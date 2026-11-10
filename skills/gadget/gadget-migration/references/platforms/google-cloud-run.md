@@ -142,12 +142,13 @@ SECRETS="DATABASE_URL=database-url:1,SHOPIFY_API_SECRET=shopify-api-secret:1"
 
 gcloud builds submit --project="$PROJECT" --tag="$IMAGE"
 
-# --wait returns when the migration finishes, and set -e stops here if it failed (with pooling on, see the guide)
+# --wait returns when the migration finishes, and set -e stops here if it failed (with pooling on, see the guide).
+# a task stops after 10 minutes by default, partway through a long index build
 gcloud run jobs deploy my-app-migrate --project="$PROJECT" --region="$REGION" --image="$IMAGE" \
   --command=npx --args=prisma,migrate,deploy \
   --service-account="my-app-worker@${PROJECT}.iam.gserviceaccount.com" \
   --set-cloudsql-instances="$SQL" --set-secrets="$SECRETS" \
-  --max-retries=0 --task-timeout=15m --wait
+  --max-retries=0 --task-timeout=1h --wait
 
 # the worker first, so it has every task route before the web creates tasks; --timeout matches enqueue's deadline
 gcloud run deploy my-app-worker --project="$PROJECT" --region="$REGION" --image="$IMAGE" \
@@ -277,14 +278,35 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 ```
 
-Callers use ``enqueueForShop(shopId, "tasks/notify-external-system", { orderId }, { key: `notify-${orderId}` })``. The guide's [signed URL helpers](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#search-files-and-other-services) work as written once the IAM script has run.
+Callers use ``enqueueForShop(shopId, "tasks/notify-external-system", { orderId }, { key: `notify-${orderId}` })``. It's the guide's [`enqueueForShop`](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#limit-concurrency-per-store) on top of this file's `enqueue`, which takes a path and a `key` it hashes into the task name.
+
+The stores that installed the app under Gadget never run the new install code, so create their queues before the switch. A new queue can take a few minutes to become available, longer than `enqueueForShop`'s two retries wait. `createShopQueue` ignores a queue that exists, so the script can run again:
+
+```typescript
+// in scripts/create-shop-queues.ts
+// run on the host before the switch, and again after the catch-up load: node build/create-shop-queues.js
+import prisma from "../app/db.server";
+import { createShopQueue } from "../app/tasks.server";
+
+const shops: { id: bigint }[] = await prisma.$queryRaw`select id from shopify_shop order by id`;
+// ten at a time, so one slow call doesn't hold up the rest and a failure names its store
+for (let i = 0; i < shops.length; i += 10) {
+  const batch = shops.slice(i, i + 10);
+  const results = await Promise.allSettled(batch.map(({ id }) => createShopQueue(String(id))));
+  results.forEach((result, j) => {
+    if (result.status === "rejected") console.error(`external-${batch[j].id}: ${result.reason}`);
+  });
+  console.log(`${Math.min(i + 10, shops.length)} of ${shops.length} stores checked`);
+}
+await prisma.$disconnect();
+``` The guide's [signed URL helpers](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#search-files-and-other-services) work as written once the IAM script has run.
 
 ## Cutover
 
 The order in [cutover.md](../cutover.md) and the guide's [cutover section](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#cut-over-to-the-new-platform) holds. On Google Cloud:
 
 - **Scheduler jobs run as soon as they exist.** Create them paused (`gcloud scheduler jobs create http ...` then `gcloud scheduler jobs pause prune-audit-logs --location=us-central1`) and resume them in the "Move scheduled work" step.
-- **Per-store queues for existing stores.** `enqueueForShop` creates each one on first use. A project has [1,000 queues per region](https://docs.cloud.google.com/tasks/docs/quotas) by default, so an app on more stores than that asks for a quota increase before the switch.
+- **Per-store queues for existing stores.** Run `scripts/create-shop-queues.ts` before the switch, and again after the catch-up load, for stores that installed in between. `enqueueForShop` covers a store missed after that. A project has [1,000 queues per region](https://docs.cloud.google.com/tasks/docs/quotas) by default, so an app on more stores than that asks for a quota increase first.
 - **Deploys don't cut off jobs.** Requests in progress finish on the old revision. An instance stopped for other reasons gets 10 seconds after `SIGTERM`, so the task's retry is what saves the job.
 - **Rollback:** `gcloud run services update-traffic my-app-web --to-revisions=<revision>=100`, then the next `scripts/deploy.sh` moves traffic back to the latest. It doesn't undo migrations.
 

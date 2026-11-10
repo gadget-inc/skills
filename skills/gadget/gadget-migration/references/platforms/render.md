@@ -21,7 +21,7 @@ node path/to/skills/gadget-migration/scripts/preflight.ts path/to/new-app --plat
 | `render/migrate-on-start`, `render/no-migrations` | A `dockerCommand` that migrates on every instance, or nothing that migrates at all | |
 | `render/prisma-generate` | A `dockerCommand` that skips the template's `docker-start`, with no `prisma generate` in the Dockerfile | |
 | `render/migrations-through-pool` | Prisma's `directUrl` variable, or the variable a migrating service uses, set from `connectionPoolString` | `render psql my-app-db -c "select pid from pg_locks where locktype = 'advisory' and objid = 72707369"` lists a stuck lock |
-| `render/owner-skips-rls` | A table with row-level security that isn't forced, while the app connects with a `fromDatabase` URL, as the user that owns the tables | `psql "$DATABASE_URL" -f path/to/skills/gadget-migration/scripts/db-check.sql` |
+| `render/owner-skips-rls` | A table with row-level security that isn't forced, while the app connects with a `fromDatabase` URL, as the user that owns the tables. The guide's [Set up development and deploys](https://docs.gadget.dev/guides/moving-to-another-platform/render#set-up-development-and-deploys) gives the separate role | `psql "$DATABASE_URL" -f path/to/skills/gadget-migration/scripts/db-check.sql` |
 | `render/health-check`, `render/single-instance` | A web service with no `healthCheckPath`, or one instance in production | `curl -sS -o /dev/null -w '%{http_code}\n' https://app.example.com/healthz` prints `200` |
 | `render/open-to-internet` | A database with no `ipAllowList`, or any `0.0.0.0/0` entry | |
 | `render/env-group-secret`, `render/env-group-reference` | `sync: false` in a Blueprint environment group (never set), or a group that references a database or service (fails validation) | |
@@ -42,7 +42,7 @@ Three checks need Render itself:
 | You see | Cause | Fix |
 |---|---|---|
 | `IMPORTANT! Eviction policy is allkeys-lru. It should be "noeviction"` in the worker log, and jobs that never run, though every `add` succeeded | Key Value created without `maxmemoryPolicy` | `maxmemoryPolicy: noeviction` in `render.yaml`, or `render kv update` as above ([Create a Key Value instance](https://docs.gadget.dev/guides/moving-to-another-platform/render#create-a-key-value-instance-for-your-queue)) |
-| `Error: P1002` with `Timed out trying to acquire a postgres advisory lock (SELECT pg_advisory_lock(72707369)). Timeout: 10000ms.` in the pre-deploy log | An earlier `prisma migrate deploy` ran through the pool on port 6432. The pool keeps Migrate's session-level lock on its server connection after Migrate exits, so even a migration over the direct URL waits for it | Set `directUrl`'s variable from `property: connectionString`, then end the holder: `select pg_terminate_backend(pid) from pg_locks where locktype = 'advisory' and objid = 72707369` |
+| `Error: P1002` with `Timed out trying to acquire a postgres advisory lock (SELECT pg_advisory_lock(72707369)). Timeout: 10000ms.` in the pre-deploy log | An earlier `prisma migrate deploy` ran through the pool on port 6432. The pool keeps Migrate's session-level lock on its server connection after Migrate exits, so even a migration over the direct URL waits for it | Set `directUrl`'s variable from `property: connectionString`, then end the holder: `select pg_terminate_backend(pid) from pg_locks where locktype = 'advisory' and objid = 72707369` ([Connect through the connection pool](https://docs.gadget.dev/guides/moving-to-another-platform/render#connect-through-the-connection-pool)) |
 | ``The table `public.Session` does not exist in the current database.`` on the first request | `dockerCommand: npm run start` replaced the template's `docker-start`, and no `preDeployCommand` runs migrations | `preDeployCommand: npx prisma migrate deploy` on the web service |
 | `prepared statement "s0" already exists` through `connectionPoolString` | Render doesn't publish its PgBouncer version, and its pool string has no query string for `pgbouncer=true` | Add the parameter in code, as in [Connect through the connection pool](https://docs.gadget.dev/guides/moving-to-another-platform/render#connect-through-the-connection-pool) |
 | `job stalled more than allowable limit` after two deploys close together, or after an environment group edit | Each deploy killed a job that outlived the shutdown delay, and a group edit redeploys every linked service with auto-deploy on | Jobs shorter than `maxShutdownDelaySeconds`, or a Workflows task ([Check your host's time limits](https://docs.gadget.dev/guides/moving-to-another-platform/render#check-your-host-s-time-limits)) |
@@ -66,7 +66,8 @@ projects:
       - name: production
         envVarGroups:
           # values only: a group defined here can't hold sync: false secrets or reference a database.
-          # my-app-secrets (SHOPIFY_API_KEY, SHOPIFY_API_SECRET, RENDER_API_KEY) is created in the dashboard
+          # my-app-secrets is created in the dashboard: SHOPIFY_API_KEY, SHOPIFY_API_SECRET, RENDER_API_KEY, and
+          # DATABASE_URL, the pool URL of a role you create, because fromDatabase's user owns the tables and skips their policies
           - name: my-app-config
             envVars:
               - { key: APP_ENV, value: production }
@@ -87,8 +88,7 @@ projects:
             domains: [app.example.com]
             previews: { plan: 0.5c-512mb, numInstances: 1 }
             envVars:
-              - key: DATABASE_URL
-                fromDatabase: { name: my-app-db, property: connectionPoolString }
+              # migrations run as the default user, which owns the tables
               - key: DIRECT_DATABASE_URL
                 fromDatabase: { name: my-app-db, property: connectionString }
               - key: REDIS_URL
@@ -105,8 +105,6 @@ projects:
             maxShutdownDelaySeconds: 300
             autoDeployTrigger: checksPass
             envVars:
-              - key: DATABASE_URL
-                fromDatabase: { name: my-app-db, property: connectionPoolString }
               - key: REDIS_URL
                 fromService: { type: keyvalue, name: my-app-queue, property: connectionString }
               - fromGroup: my-app-config
@@ -158,14 +156,12 @@ projects:
             preDeployCommand: npx prisma migrate deploy
             domains: [staging.example.com]
             envVars:
-              - key: DATABASE_URL
-                fromDatabase: { name: my-app-staging-db, property: connectionPoolString }
               - key: DIRECT_DATABASE_URL
                 fromDatabase: { name: my-app-staging-db, property: connectionString }
               - key: REDIS_URL
                 fromService: { type: keyvalue, name: my-app-staging-queue, property: connectionString }
               - fromGroup: my-app-staging-config
-              # the staging Shopify app's key and secret, created in the dashboard
+              # the staging Shopify app's key and secret, and the app role's DATABASE_URL, created in the dashboard
               - fromGroup: my-app-staging-secrets
           - type: worker
             name: my-app-staging-worker
@@ -175,8 +171,6 @@ projects:
             dockerCommand: node build/worker.js
             maxShutdownDelaySeconds: 300
             envVars:
-              - key: DATABASE_URL
-                fromDatabase: { name: my-app-staging-db, property: connectionPoolString }
               - key: REDIS_URL
                 fromService: { type: keyvalue, name: my-app-staging-queue, property: connectionString }
               - fromGroup: my-app-staging-config
@@ -196,7 +190,7 @@ projects:
             ipAllowList: []
 ```
 
-The Dockerfile needs `RUN npx prisma generate` after `COPY . .`, because `npm run start` skips the template's `docker-start` ([common.md](common.md)). Hobby workspaces get 2 environments per project, so this file fits, but previews need Pro.
+The Dockerfile needs `RUN npx prisma generate` after `COPY . .`, because `npm run start` skips the template's `docker-start` ([common.md](common.md)). The app's own role is the one the guide's [Set up development and deploys](https://docs.gadget.dev/guides/moving-to-another-platform/render#set-up-development-and-deploys) creates; test it through the pool on staging, because Render doesn't say whether its pool accepts roles you create. Hobby workspaces get 2 environments per project, so this file fits, but previews need Pro.
 
 ### Start Workflows runs under the start limit
 

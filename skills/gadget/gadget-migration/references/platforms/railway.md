@@ -63,7 +63,7 @@ Then add `--appendonly yes` to the start command in the Redis service's **Settin
 
 ### The project file, with staging and the gaps closed
 
-This is the guide's file with four changes: the domain names its port, because `railway` 3.16.0 sends a domain given as a string to port 8080 while the template's server listens on `PORT`; the worker starts with `node`, so any package manager works; the cron service is applied only once a constant says scheduled work has moved; and the web service gets the bucket's variables. `ctx.environment` is the environment you linked with `railway link`, such as `staging`.
+This is the guide's file, with its domain port and `PORT=3000`, plus four changes: staging gets its own domain; the worker starts with `node`, so any package manager works; the cron service and the switch to `DATABASE_UNPOOLED_URL` each wait for a constant you flip at the right step; and the web service gets the bucket's variables. `ctx.environment` is the environment you linked with `railway link`, such as `staging`.
 
 ```typescript
 // in .railway/railway.ts

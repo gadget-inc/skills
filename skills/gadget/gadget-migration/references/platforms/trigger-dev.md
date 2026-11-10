@@ -40,7 +40,7 @@ What the script can't see:
 
 | You see | Cause | Fix |
 |---|---|---|
-| `ERROR: Version mismatch detected while running in CI. This won't end well. Aborting.`, then `CLI version: 4.8.4` and `- @trigger.dev/sdk@4.8.3`. Outside CI: `X Error: Your @trigger.dev packages don't match the CLI version (4.8.4).` | `npx trigger.dev@latest deploy` after a new CLI shipped | Run the CLI version your packages pin, such as `npx trigger.dev@4.8.3 deploy` (`trigger-dev/cli-latest`) |
+| `ERROR: Version mismatch detected while running in CI. This won't end well. Aborting.`, then `CLI version: 4.8.4` and `- @trigger.dev/sdk@4.8.3`. Outside CI: `X Error: Your @trigger.dev packages don't match the CLI version (4.8.4).` | `npx trigger.dev@latest deploy` after a new CLI shipped | Run the CLI version your packages pin, such as `npx trigger.dev@4.8.3 deploy`, or add `trigger.dev` to `devDependencies` at the SDK's version (`trigger-dev/cli-latest`, [Deploy tasks](https://docs.gadget.dev/guides/moving-to-another-platform/trigger-dev#deploy-tasks)) |
 | `ApiClientMissingError: You need to set the TRIGGER_SECRET_KEY environment variable.` | The service that triggers has no `TRIGGER_SECRET_KEY` | Set the environment's secret key on every service that triggers |
 | `Property 'maxDuration' is missing in type` from `tsc` on `trigger.config.ts` | No `maxDuration` | Set it above your longest action, such as `900` for Gadget's 15-minute maximum |
 | `MAX_DURATION_EXCEEDED`, status **Timed out** | An attempt ran longer than `maxDuration`. `onFailure` doesn't run | Raise `maxDuration`, or split the task ([Check your host's time limits](https://docs.gadget.dev/guides/moving-to-another-platform/trigger-dev#check-your-host-s-time-limits)) |

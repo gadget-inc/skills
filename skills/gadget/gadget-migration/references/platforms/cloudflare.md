@@ -38,7 +38,7 @@ Every row was reproduced locally with Wrangler 4.160.0 and the Cloudflare Vite p
 | `The Workers runtime canceled this request because it detected that your Worker's code had hung and would never generate a response.` on the second request | A client opened in one request and kept for the next | A client per request, closed in `finally` |
 | `duplicate key value violates unique constraint "pg_type_typname_nsp_index"` | `PostgreSQLSessionStorage` created per call on an empty database: 10 of 10 concurrent first calls failed in Node | The guide's `workerSessionStorage` |
 | `Detected an empty appUrl configuration` under `vite dev` | Every var is inside an environment and `CLOUDFLARE_ENV` isn't set | The `vite.config.ts` below |
-| OAuth and redirects go to `https://staging.example.com` while you test through the `shopify app dev` tunnel | The Worker reads its vars and `.dev.vars`, never the shell. Not even `CLOUDFLARE_INCLUDE_PROCESS_ENV=true` passes the CLI's `SHOPIFY_APP_URL` through | The `vite.config.ts` below |
+| OAuth and redirects go to `https://staging.example.com` while you test through the `shopify app dev` tunnel | The Worker reads its vars and `.dev.vars`, never the shell. Not even `CLOUDFLARE_INCLUDE_PROCESS_ENV=true` passes the CLI's `SHOPIFY_APP_URL` through | The `vite.config.ts` below, and the development app's secret in `.dev.vars` ([Run your app locally](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#run-your-app-locally)) |
 | `When developing locally, you should use a local Postgres connection string to emulate Hyperdrive functionality.`, or `You must provide a password - e.g. 'user:password@database.example.com:port/databasename'` | No local database for the Hyperdrive binding, or one without a password | `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://postgres:postgres@127.0.0.1:5432/my_app`, with a password |
 | `"hyperdrive" exists at the top level, but not on "env.staging".` | Environments don't inherit bindings, `vars`, or `secrets` | Repeat them in each environment |
 | `` You have specified the environment "production" via the `--env/-e` CLI argument. This does not match the target environment "staging" that was used when building the application. `` | A staging build deployed with `--env production` | `CLOUDFLARE_ENV=production react-router build`, then `wrangler deploy` with no `--env` |
@@ -205,7 +205,8 @@ import { defineConfig, type UserConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 
 // shopify app dev sets these in this process, and a Worker sees only its vars and .dev.vars
-const SHOPIFY_CLI_VARS = ["SHOPIFY_APP_URL", "SHOPIFY_API_KEY", "SHOPIFY_API_SECRET", "SCOPES"];
+// SHOPIFY_API_SECRET isn't here: the Worker reads it from .dev.vars even when this sets it
+const SHOPIFY_CLI_VARS = ["SHOPIFY_APP_URL", "SHOPIFY_API_KEY", "SCOPES"];
 
 export default defineConfig(({ command }) => {
   // wrangler.jsonc keeps every binding inside an environment, so the dev server uses staging's
