@@ -46,6 +46,44 @@ Without the template, verify with `verifyWebhook` from [shopify-signatures.md](s
 
 If the app has no queue, Shopify can deliver to Google Cloud Pub/Sub or Amazon EventBridge instead: set the subscription's `uri` in `shopify.app.toml` to `pubsub://<project-id>:<topic-id>` or an EventBridge event source ARN. That removes the 5-second limit from your servers. These deliveries carry no HMAC, and Pub/Sub can deliver a message more than once, so the duplicate check below still applies.
 
+## Or let Hookdeck answer Shopify
+
+Hookdeck is a hosted webhook gateway that keeps HTTPS delivery. Shopify delivers to a Hookdeck source, Hookdeck answers Shopify, and then it delivers to your app and waits 60 seconds by default, up to 15 minutes per destination. The route can then do the work before it responds, with no queue of your own. Gadget's guide has the full setup: https://docs.gadget.dev/guides/moving-to-another-platform/hookdeck
+
+Set it up like this:
+
+- **Source:** type `SHOPIFY`, with the app's client secret. A delivery whose signature doesn't match gets a 401 and is recorded as `VERIFICATION_FAILED`. With the wrong secret, such as the development app's, Shopify retries each webhook for 4 hours and then drops it.
+- **`uri` and destination:** Hookdeck forwards the path after the source URL. Put the route's path in the TOML `uri`, such as `https://hkdk.events/<source-id>/webhooks/orders/updated`, and only the app's origin in the destination URL. A destination URL that also has the path receives `/webhooks/orders/updated/webhooks/orders/updated` and gets a 404.
+- **Retry rule:** add one. Exponential from 60,000 ms with 10 retries doubles the wait each time, so the retries cover at least 8.5 hours. Retry every response outside the 200 range, not only 5xx, so a 404 from a wrong path recovers once you fix it.
+- **Deduplication rule:** include the field `headers.x-shopify-webhook-id`, with the maximum window of 1 hour. The window is in milliseconds (`3600000`) in the API and in the CLI's `--rules` JSON. The CLI's `--rule-deduplicate-window` help says seconds but passes the value to the API unchanged, so `3600` there is 3.6 seconds. Keep the `processed_webhook` check below anyway. Shopify can resend after an hour, and Hookdeck retries a delivery whose response it never got.
+- **Delivery groups:** a key of `headers.x-shopify-shop-domain` gives each store its own rate. Group rates are per second, minute, or hour, not a concurrency limit.
+
+Hookdeck forwards Shopify's body and headers unchanged, so `authenticate.webhook` and `verifyWebhook` still check Shopify's HMAC. Don't add a Hookdeck transformation that changes the body: even reformatted whitespace fails that check on every delivery. Hookdeck also signs each request in `x-hookdeck-signature`, plus `x-hookdeck-signature-2` while a rolled secret is still active. It's the same algorithm as Shopify's, a base64 HMAC-SHA256 of the raw body, keyed with the Hookdeck project's signing secret, so `verifyWebhook` checks it too:
+
+```typescript
+// in app/routes/webhooks.orders.updated.tsx
+const rawBody = new Uint8Array(await request.clone().arrayBuffer());
+const secret = process.env.HOOKDECK_WEBHOOK_SECRET!;
+const fromHookdeck =
+  (await verifyWebhook(rawBody, request.headers.get("x-hookdeck-signature"), secret)) ||
+  (await verifyWebhook(rawBody, request.headers.get("x-hookdeck-signature-2"), secret));
+if (!fromHookdeck) return new Response(undefined, { status: 401 });
+
+// authenticate.webhook reads the original body, so the copy above leaves it intact
+const { shop, payload, webhookId } = await authenticate.webhook(request);
+```
+
+What Hookdeck doesn't change:
+
+- **Order.** Its retries and rate limits reorder webhooks further, so keep the `updated_at` check.
+- **Missed webhooks.** A webhook Shopify never sends never reaches Hookdeck, so keep the reconciliation in [shopify-sync.md](shopify-sync.md).
+- **Admin requests.** Hookdeck answers every request itself and can't return your app's response, so the app URL, app proxy, and extension routes go to the app directly.
+- **Per-store subscriptions Gadget created.** They deliver to Gadget until you delete them, as in [cutover.md](cutover.md).
+
+For a store-by-store cutover, filters on `x-shopify-shop-domain` can route each store's webhooks to Gadget or to the new app, which replaces the webhook half of a forwarding layer. A filter change only applies to webhooks received after it, so wait for a store's queued deliveries to Gadget to finish before moving its tokens. The guide has the order.
+
+Limits that matter at Shopify volume, from Hookdeck's pricing and limits pages on 9 November 2026: the free Developer plan has 10,000 events a month, which an app on 300 stores uses up in hours. The Team plan starts at $39 a month, plus $3.00 per 100,000 events up to 5 million. Every plan includes 5 events per second per destination, and deliveries above that queue: 20,000 `products/update` webhooks from one bulk edit take about 67 minutes. Events are kept 3 days on Developer, 7 on Team, and 30 on Growth, and you can only retry or replay within that window.
+
 ## Drop duplicate deliveries
 
 A queue's deduplication covers deliveries that arrive while the job is known to the queue. For a guarantee that outlives the queue, record the webhook id in the same transaction as the write:
@@ -204,7 +242,7 @@ Gadget uses per-store subscriptions for models with metafield fields because sub
 
 ## Common pitfalls
 
-- **Doing the work before responding.** Anything slower than 5 seconds is processed twice.
+- **Doing the work before responding.** Anything slower than 5 seconds is processed twice, unless a gateway such as Hookdeck answers Shopify for you.
 - **A redirect on the webhook URL.** A trailing-slash or `www` redirect counts as a failed delivery. Give Shopify the final URL.
 - **Recording the webhook id outside the write's transaction.** A failed job then marks a webhook processed that never was.
 - **Checking `updated_at` in a separate `select`.** Two workers can both pass the check and the older one can write last. Put the check in the `where` of the upsert.
