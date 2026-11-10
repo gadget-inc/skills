@@ -1,0 +1,27 @@
+{
+  "name": "my-app",
+  "main": "./workers/app.ts",
+  "compatibility_date": "2026-11-01",
+  // top-level bindings: environments don't inherit these
+  "vars": { "SHOPIFY_APP_URL": "https://app.example.com" },
+  "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "a1b2c3d4e5f60718293a4b5c6d7e8f90" }],
+  "env": {
+    "production": {
+      "vars": { "SHOPIFY_APP_URL": "https://app.example.com" },
+      "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "a1b2c3d4e5f60718293a4b5c6d7e8f90" }],
+      "triggers": { "crons": ["0 2 * * *", "0 9 * * 1"] },
+      "queues": {
+        "producers": [{ "binding": "EXTERNAL_QUEUE", "queue": "my-app-external" }],
+        "consumers": [{ "queue": "my-app-external", "max_batch_size": 1 }]
+      },
+      "r2_buckets": [{ "binding": "FILES", "bucket_name": "my-app-files" }]
+    },
+    "staging": {
+      "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "0f9e8d7c6b5a49382716051f2e3d4c5b" }],
+      "queues": {
+        "producers": [{ "binding": "EXTERNAL_QUEUE", "queue": "my-app-external" }]
+      },
+      "r2_buckets": [{ "binding": "FILES", "bucket_name": "my-app-staging-files" }]
+    }
+  }
+}
