@@ -48,7 +48,7 @@ If the app has no queue, Shopify can deliver to Google Cloud Pub/Sub or Amazon E
 
 ## Or let Hookdeck answer Shopify
 
-Hookdeck is a hosted webhook gateway that keeps HTTPS delivery. Shopify delivers to a Hookdeck source, Hookdeck answers Shopify, and then it delivers to your app and waits 60 seconds by default, up to 15 minutes per destination. The route can then do the work before it responds, with no queue of your own. Gadget's guide has the full setup: https://docs.gadget.dev/guides/moving-to-another-platform/hookdeck
+Hookdeck is a hosted webhook gateway that keeps HTTPS delivery. Shopify delivers to a Hookdeck source, Hookdeck answers Shopify, and then it delivers to your app and waits 60 seconds by default, up to 15 minutes per destination. The route can then do the work before it responds, without a job queue for webhook retries. Hookdeck only needs an HTTPS route, so this works whatever framework, database client, or queue the app uses. Gadget's guide has the full setup: https://docs.gadget.dev/guides/moving-to-another-platform/hookdeck
 
 Set it up like this:
 
@@ -58,7 +58,7 @@ Set it up like this:
 - **Deduplication rule:** include the field `headers.x-shopify-webhook-id`, with the maximum window of 1 hour. The window is in milliseconds (`3600000`) in the API and in the CLI's `--rules` JSON. The CLI's `--rule-deduplicate-window` help says seconds but passes the value to the API unchanged, so `3600` there is 3.6 seconds. Keep the `processed_webhook` check below anyway. Shopify can resend after an hour, and Hookdeck retries a delivery whose response it never got.
 - **Delivery groups:** a key of `headers.x-shopify-shop-domain` gives each store its own rate. Group rates are per second, minute, or hour, not a concurrency limit.
 
-Hookdeck forwards Shopify's body and headers unchanged, so `authenticate.webhook` and `verifyWebhook` still check Shopify's HMAC. Don't add a Hookdeck transformation that changes the body: even reformatted whitespace fails that check on every delivery. Hookdeck also signs each request in `x-hookdeck-signature`, plus `x-hookdeck-signature-2` while a rolled secret is still active. It's the same algorithm as Shopify's, a base64 HMAC-SHA256 of the raw body, keyed with the Hookdeck project's signing secret, so `verifyWebhook` checks it too:
+Hookdeck forwards Shopify's body and headers unchanged, so whatever checks Shopify's HMAC in the app still works, whether that's `authenticate.webhook` from Shopify's app template, `shopify.webhooks.validate` from `@shopify/shopify-api`, or `verifyWebhook`. Don't add a Hookdeck transformation that changes the body: even reformatted whitespace fails that check on every delivery. Hookdeck also signs each request in `x-hookdeck-signature`, plus `x-hookdeck-signature-2` while a rolled secret is still active. It's the same algorithm as Shopify's, a base64 HMAC-SHA256 of the raw body, keyed with the Hookdeck project's signing secret, so `verifyWebhook` checks it too. The example below is a route in Shopify's app template; on another framework, run the same check on the raw body before the Shopify check:
 
 ```typescript
 // in app/routes/webhooks.orders.updated.tsx
