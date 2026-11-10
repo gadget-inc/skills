@@ -90,7 +90,15 @@ export function preflight(root: string, only?: string[]): { platforms: CheckModu
       });
     }
   }
-  return { platforms, findings };
+  const suppressed = new Set<string>();
+  for (const module of platforms) {
+    try {
+      for (const id of module.suppresses?.(repo) ?? []) suppressed.add(id);
+    } catch {
+      // a module that can't decide suppresses nothing
+    }
+  }
+  return { platforms, findings: findings.filter((f) => !suppressed.has(f.id)) };
 }
 
 const ORDER = { error: 0, warning: 1, manual: 2 } as const;

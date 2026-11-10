@@ -2,6 +2,8 @@
 // scripts/preflight.ts, its config readers and common checks, and the code in references/platforms/common.md.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import { keyLine, parseDockerfile, parseJsonc, parseToml, parseYaml } from "../../skills/gadget/gadget-migration/scripts/checks/read-config.ts";
@@ -116,6 +118,17 @@ describe("common checks", () => {
   it("reports nothing but the Redis reminder for the fixed app", () => {
     const { findings } = preflight(fixture("common-good"), []);
     assert.deepEqual(where(findings), ["common/redis-eviction"]);
+  });
+
+  it("drops common/migrate-on-start when every service starts with its own command", () => {
+    // both fixtures keep the template's CMD ["npm", "run", "docker-start"], which no service runs
+    for (const platform of ["render", "railway"]) {
+      const dir = fixture(`${platform}-good`);
+      assert.match(readFileSync(join(dir, "Dockerfile"), "utf8"), /docker-start/);
+      const ids = preflight(dir, [platform]).findings.map((f) => f.id);
+      assert.ok(!ids.includes("common/migrate-on-start"), platform);
+    }
+    assert.ok(preflight(fixture("common-bad"), []).findings.some((f) => f.id === "common/migrate-on-start"));
   });
 
   it("detects no platform for an app without platform files", () => {

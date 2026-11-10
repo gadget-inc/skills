@@ -34,7 +34,8 @@ export function block(reference: string, path: string, index = 0): string {
   return found[index].code;
 }
 
-const RELATIVE_IMPORT = /(?:import|export)\s+(type\s+)?([\s\S]*?)\s+from\s+["'](\.{1,2}\/[^"']+)["']/g;
+// the clause can't contain "from", so one match never spans two import statements
+const RELATIVE_IMPORT = /(?:import|export)\s+(type\s+)?((?:(?!\bfrom\b)[\s\S])*?)\s+from\s+["'](\.{1,2}\/[^"']+)["']/g;
 
 // Writes every TypeScript block of a reference into dir at its path, so blocks that import each
 // other resolve, and writes a stub for every relative import no block provides. A stub exports each
@@ -69,7 +70,7 @@ function writeStubs(root: string, files: Map<string, string>) {
     for (const match of code.matchAll(RELATIVE_IMPORT)) {
       const target = posix.normalize(posix.join(posix.dirname(path), match[3]));
       const candidates = [target, `${target}.ts`, `${target}.tsx`, `${target}/index.ts`, target.replace(/\.js$/, ".ts")];
-      if (candidates.some((c) => files.has(c) || existsSync(join(root, c)) && files.has(c))) continue;
+      if (candidates.some((c) => files.has(c))) continue;
       const entry = stubs.get(target) ?? { names: new Set<string>(), hasDefault: false };
       const clause = match[2].trim();
       const named = clause.match(/\{([\s\S]*)\}/)?.[1] ?? "";
@@ -96,6 +97,7 @@ function writeStubs(root: string, files: Map<string, string>) {
 
 // Runs tsc --noEmit in each project root with the given compiler options, using the TypeScript
 // installed in testDir. Returns tsc's output; throws with it when tsc reports errors.
+// TypeScript's globs skip folders that start with a dot, such as .railway, so pass include for those.
 export function typecheck(testDir: string, roots: string[], compilerOptions: Record<string, unknown>, include = ["**/*.ts", "**/*.tsx"]) {
   const tsc = join(testDir, "node_modules/typescript/bin/tsc");
   const outputs: string[] = [];

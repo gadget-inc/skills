@@ -47,6 +47,9 @@ export interface CheckModule {
   // whether the app looks like it uses this platform or service
   detect(repo: Repo): boolean;
   run(repo: Repo): Finding[];
+  // ids of common findings this platform makes moot for this app, such as "common/migrate-on-start"
+  // when every service starts the image with its own command
+  suppresses?(repo: Repo): string[];
 }
 
 export const DOCS = "https://docs.gadget.dev/guides/moving-to-another-platform";
