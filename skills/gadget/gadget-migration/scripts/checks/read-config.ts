@@ -56,6 +56,101 @@ export function parseJsonc(text: string): any {
 }
 
 // ---------------------------------------------------------------------------------------------
+// JSONC with line numbers: like parseJsonc, and keyLine() returns the line of every key and array item.
+
+function stripJsonc(text: string): string {
+  // comments and trailing commas become spaces, so every index still points at the same line
+  let out = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') j += text[j] === "\\" ? 2 : 1;
+      out += text.slice(i, j + 1);
+      i = j;
+    } else if (c === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== "\n") (out += " "), i++;
+      if (i < text.length) out += "\n";
+    } else if (c === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      const stop = end < 0 ? text.length : end + 2;
+      out += text.slice(i, stop).replace(/[^\n]/g, " ");
+      i = stop - 1;
+    } else out += c;
+  }
+  return out.replace(/,(\s*[}\]])/g, " $1");
+}
+
+export function parseJsoncWithLines(source: string): any {
+  const text = stripJsonc(source);
+  let i = 0;
+  const ws = () => {
+    while (i < text.length && /\s/.test(text[i])) i++;
+  };
+  const fail = (what: string): never => {
+    throw new Error(`line ${lineAt(text, i)}: expected ${what}`);
+  };
+  // keyLine() reads these, as it does for the YAML and TOML readers
+  const rememberAt = (target: object, key: string | number, at: number) => remember(target, key, lineAt(text, at));
+  const string = (): string => {
+    const start = i;
+    i++;
+    while (i < text.length && text[i] !== '"') i += text[i] === "\\" ? 2 : 1;
+    i++;
+    return JSON.parse(text.slice(start, i));
+  };
+  const value = (): any => {
+    ws();
+    const c = text[i];
+    if (c === "{") {
+      i++;
+      const object: Record<string, any> = {};
+      ws();
+      if (text[i] === "}") return i++, object;
+      for (;;) {
+        ws();
+        if (text[i] !== '"') fail("a key");
+        const at = i;
+        const key = string();
+        ws();
+        if (text[i] !== ":") fail(":");
+        i++;
+        rememberAt(object, key, at);
+        object[key] = value();
+        ws();
+        if (text[i] === ",") i++;
+        else if (text[i] === "}") return i++, object;
+        else fail(", or }");
+      }
+    }
+    if (c === "[") {
+      i++;
+      const array: any[] = [];
+      ws();
+      if (text[i] === "]") return i++, array;
+      for (;;) {
+        ws();
+        rememberAt(array, array.length, i);
+        array.push(value());
+        ws();
+        if (text[i] === ",") i++;
+        else if (text[i] === "]") return i++, array;
+        else fail(", or ]");
+      }
+    }
+    if (c === '"') return string();
+    const literal = text.slice(i).match(/^(true|false|null|-?\d+(\.\d+)?([eE][+-]?\d+)?)/);
+    if (!literal) fail("a value");
+    i += literal![0].length;
+    return JSON.parse(literal![0]);
+  };
+  const result = value();
+  ws();
+  if (i < text.length) fail("the end of the file");
+  return result;
+}
+
+// ---------------------------------------------------------------------------------------------
 // YAML: block mappings and sequences, plain and quoted scalars, flow [] and {}, block scalars
 
 interface YamlLine {

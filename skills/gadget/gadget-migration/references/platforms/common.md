@@ -148,6 +148,8 @@ process.once("SIGTERM", async () => {
 });
 ```
 
+Both handlers listen for `SIGTERM`. Fly.io sends `SIGINT` unless `fly.toml` sets `kill_signal = "SIGTERM"`, and without it the web server keeps waiting on its Redis connection until Fly.io kills it, as [fly-io.md](fly-io.md) shows.
+
 The worker's handler only runs if the signal reaches Node, so start the worker with `node` and a compiled file. pnpm didn't pass `SIGTERM` on in a test on `node:22-alpine`, and Node's Docker guidance warns that npm can swallow it. The template's Dockerfile installs production dependencies only and its TypeScript imports have no file extensions, so bundle the worker during the build with esbuild, listed under `dependencies`:
 
 ```json
