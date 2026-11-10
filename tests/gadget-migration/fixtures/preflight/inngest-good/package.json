@@ -1,0 +1,9 @@
+{
+  "name": "my-app",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "inngest": "4.26.2"
+  }
+}

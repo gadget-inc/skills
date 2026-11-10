@@ -1,0 +1,14 @@
+{
+  "name": "gadget-migration-platforms-inngest-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"*.integration.ts\""
+  },
+  "dependencies": {
+    "@types/node": "25.5.2",
+    "esbuild": "0.28.2",
+    "inngest": "4.26.2",
+    "typescript": "5.9.3"
+  }
+}
