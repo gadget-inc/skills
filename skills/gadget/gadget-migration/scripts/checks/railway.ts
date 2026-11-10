@@ -3,7 +3,7 @@
 // call's object, and the variable strings anywhere in the file.
 import { DOCS, type CheckModule, type Finding, type Repo } from "./types.ts";
 import { lineAt, lineOf, parseJsonc, parseToml } from "./read-config.ts";
-import { expandScripts, startOverrideFindings } from "./common.ts";
+import { dockerfilePath, expandScripts, startOverrideFindings } from "./common.ts";
 
 const GUIDE = `${DOCS}/railway`;
 const IAC = ".railway/railway.ts";
@@ -130,6 +130,24 @@ export function minutesBetweenRuns(schedule: string): number | null {
   return gap === Infinity ? 1440 : gap;
 }
 
+// The Dockerfile a service builds: its dockerfilePath or RAILWAY_DOCKERFILE_PATH, then railway.json's or
+// railway.toml's build.dockerfilePath, then Dockerfile. Null when a builder other than Dockerfile is set,
+// such as Railpack, which ignores the Dockerfile.
+function dockerfileOf(repo: Repo, body: string, envText: string): string | null {
+  let build: any = {};
+  for (const file of ["railway.json", "railway.toml"]) {
+    const text = repo.read(file);
+    if (text === null) continue;
+    try {
+      build = (file.endsWith(".json") ? parseJsonc(text) : parseToml(text))?.build ?? {};
+    } catch {}
+    break;
+  }
+  const builder = stringValue(body, /builder/)?.value ?? (typeof build.builder === "string" ? build.builder : undefined);
+  if (builder && !/docker/i.test(builder)) return null;
+  return dockerfilePath(stringValue(body, /dockerfilePath/)?.value ?? stringValue(envText, /RAILWAY_DOCKERFILE_PATH/)?.value ?? build.dockerfilePath);
+}
+
 function iacFindings(repo: Repo, text: string): Finding[] {
   const findings: Finding[] = [];
   const push = (f: Omit<Finding, "file">) => findings.push({ file: IAC, ...f });
@@ -212,9 +230,10 @@ function iacFindings(repo: Repo, text: string): Finding[] {
         docs: `${GUIDE}#run-migrations-once-per-deploy`,
       });
     }
-    if (start && !overrideChecked) {
+    const dockerfile = dockerfileOf(repo, call.body, envText);
+    if (start && dockerfile && !overrideChecked) {
       overrideChecked = true;
-      findings.push(...startOverrideFindings(repo, "railway", IAC, at(start.index), start.value, `${GUIDE}#run-migrations-once-per-deploy`));
+      findings.push(...startOverrideFindings(repo, "railway", IAC, at(start.index), start.value, `${GUIDE}#run-migrations-once-per-deploy`, dockerfile));
     }
     const sleeps = call.body.match(/\bsleepApplication\s*:\s*true\b/);
     if (sleeps) {

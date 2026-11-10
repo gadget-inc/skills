@@ -14,3 +14,9 @@ export async function handleOrderCreated(shopId: bigint, order: { id: number; to
 export async function resendOrder(shopId: string, orderId: string) {
   await inngest.send({ name: "app/order.created", data: { shopId, orderId } });
 }
+
+// session.shopId is a bigint, and the const that shares its name is a string
+export async function resendOrderCreated(session: { shopId: bigint }, orderId: string) {
+  const shopId = session.shopId.toString();
+  await inngest.send({ name: "app/order.created", data: { shopId, orderId } });
+}

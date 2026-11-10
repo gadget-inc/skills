@@ -2,6 +2,7 @@
 import { DOCS, type CheckModule, type Finding, type Repo } from "./types.ts";
 import { lineAt, lineOf, parseJsonc } from "./read-config.ts";
 import { expandScripts } from "./common.ts";
+import { mask } from "./source-scan.ts";
 
 const GUIDE = `${DOCS}/vercel`;
 const REF = "references/platforms/vercel.md";
@@ -47,6 +48,20 @@ const handlerLine = (text: string) => lineOf(text, /export\s+(?:const|let|async\
 
 const exportsName = (text: string, name: string) =>
   new RegExp(`export\\s+(?:const|let|var|async\\s+function|function)\\s+${name}\\b|export\\s*\\{[^}]*\\bas\\s+${name}\\b[^}]*\\}|export\\s*\\{[^}]*\\b${name}\\b[^}]*\\}`).test(text);
+
+// Whether a route checks CRON_SECRET, in its own code or in a file it imports with a relative path, such
+// as a scheduleRoute() helper that every schedule route wraps its job in. Comments don't count.
+function checksSecret(repo: Repo, file: string): boolean {
+  const code = mask(repo.read(file) ?? "", false);
+  if (code.includes("CRON_SECRET")) return true;
+  for (const m of code.matchAll(/(?:\bfrom\s+|\bimport\s*\(\s*|\brequire\s*\(\s*)["'](\.{1,2}\/[^"']+|~\/[^"']+)["']/g)) {
+    const spec = m[1].startsWith("~/") ? `/app/${m[1].slice(2)}` : new URL(m[1], `file:///${file}`).pathname;
+    const base = spec.slice(1).replace(/\.(js|mjs|cjs)$/, "");
+    const found = [base, ...["ts", "tsx", "js", "jsx", "mjs"].map((ext) => `${base}.${ext}`), `${base}/index.ts`, `${base}/index.js`].find((c) => repo.exists(c));
+    if (found && mask(repo.read(found) ?? "", false).includes("CRON_SECRET")) return true;
+  }
+  return false;
+}
 
 function configFindings(repo: Repo, text: string, config: any): Finding[] {
   const findings: Finding[] = [];
@@ -97,7 +112,7 @@ function configFindings(repo: Repo, text: string, config: any): Finding[] {
       docs: `${GUIDE}#cut-over-to-the-new-platform`,
     });
   }
-  const sourceMentionsSecret = repo.sourceFiles().some((f) => (repo.read(f) ?? "").includes("CRON_SECRET"));
+  const sourceMentionsSecret = repo.sourceFiles().some((f) => mask(repo.read(f) ?? "", false).includes("CRON_SECRET"));
   const targets = [
     ...schedules.map(([name, s]) => ({ name, path: s?.path, method: String(s?.requestMethod ?? "POST").toUpperCase(), line: lineOf(text, new RegExp(`"${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\s*:`)) })),
     // Vercel's older Cron Jobs call their path with GET
@@ -107,7 +122,7 @@ function configFindings(repo: Repo, text: string, config: any): Finding[] {
     if (typeof target.path !== "string") continue;
     const file = routeFile(repo, target.path.split("?")[0]);
     const route = file ? (repo.read(file) ?? "") : "";
-    if (file && !route.includes("CRON_SECRET")) {
+    if (file && !checksSecret(repo, file)) {
       findings.push({
         id: "vercel/schedule-unprotected",
         severity: "error",
@@ -129,6 +144,8 @@ function configFindings(repo: Repo, text: string, config: any): Finding[] {
       });
     }
     if (!file) continue;
+    // a Pages Router API route's default export takes every method
+    if (/^(src\/)?pages\//.test(file) && /export\s+default\b/.test(mask(route))) continue;
     const reactRouterRoute = file.startsWith("app/routes/");
     const handler = reactRouterRoute ? (target.method === "GET" ? "loader" : "action") : target.method;
     if (!exportsName(route, handler)) {
@@ -161,7 +178,7 @@ function codeFindings(repo: Repo, config: any): Finding[] {
     if (!text) continue;
 
     // the route Inngest calls for every step, with Vercel's default 300 seconds
-    const serve = text.match(/import\s*\{[^}]*\bserve\b[^}]*\}\s*from\s*["']inngest\/[\w-]+["']/);
+    const serve = text.match(/import\s*\{[^}]*\bserve\b[^}]*\}\s*from\s*["']inngest\/[\w-]+["']|\{[^}]*\bserve\b[^}]*\}\s*=\s*require\s*\(\s*["']inngest\/[\w-]+["']/);
     if (serve && !/maxDuration/.test(text) && !functionPatterns.some((p) => p.regex.test(file) && p.maxDuration)) {
       findings.push({
         id: "vercel/inngest-max-duration",
@@ -220,12 +237,19 @@ function codeFindings(repo: Repo, config: any): Finding[] {
   return findings;
 }
 
-// A Vercel deployment or branch URL, such as my-app-4f9c2a1bc-my-team.vercel.app or my-app-git-main-my-team.vercel.app,
-// as opposed to a production alias such as my-app.vercel.app or my-app-my-team.vercel.app
+// A Vercel deployment or branch URL, as opposed to a production alias. A deployment URL is
+// <project>-<9-character hash>-<team>.vercel.app, such as my-app-4f9c2a1bc-my-team.vercel.app, and a branch
+// URL is <project>-git-<branch>-<team>.vercel.app. An alias such as my-app.vercel.app, my-app-my-team.vercel.app,
+// or my-app-studio42.vercel.app has neither.
 function deploymentUrl(text: string): { url: string; index: number } | null {
   for (const match of text.matchAll(/https:\/\/([a-z0-9-]+)\.vercel\.app/g)) {
-    const segments = match[1].split("-").slice(1);
-    if (segments.includes("git") || segments.some((s) => s.length >= 7 && s.length <= 9 && /\d/.test(s) && /[a-z]/.test(s))) return { url: match[0], index: match.index! };
+    const segments = match[1].split("-");
+    // the hash or "git" comes after the project name's first segment, and the team slug follows it. A hash
+    // has a digit, so a 9-letter word in a project name, as in my-dashboard-team, isn't one.
+    const middle = (i: number) => i >= 1 && i < segments.length - 1;
+    const hashed = segments.some((s, i) => middle(i) && /^[a-z0-9]{9}$/.test(s) && /\d/.test(s));
+    const branch = segments.some((s, i) => middle(i) && s === "git" && i < segments.length - 2);
+    if (hashed || branch) return { url: match[0], index: match.index! };
   }
   return null;
 }

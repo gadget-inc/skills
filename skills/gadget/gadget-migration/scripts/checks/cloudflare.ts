@@ -2,6 +2,7 @@
 import { DOCS, type CheckModule, type Finding, type Repo } from "./types.ts";
 import { keyLine, lineAt, lineOf, parseJsoncWithLines, parseToml } from "./read-config.ts";
 import { expandScripts } from "./common.ts";
+import { mask } from "./source-scan.ts";
 
 const GUIDE = `${DOCS}/cloudflare`;
 const REF = "references/platforms/cloudflare.md";
@@ -60,6 +61,28 @@ function scopes(w: Wrangler): { name: string; node: any; path: string[] }[] {
 }
 
 const usesVitePlugin = (repo: Repo) => "@cloudflare/vite-plugin" in repo.dependencies();
+
+// Wrangler alone doesn't mean the app runs on Workers: an app on another host installs it to manage R2
+// buckets or KV. A Wrangler config file or the Vite plugin does.
+const runsOnWorkers = (repo: Repo) => CONFIG_FILES.some((f) => repo.exists(f)) || usesVitePlugin(repo);
+
+// A host besides Workers that runs long-lived processes or the Dockerfile, such as Fly.io running a BullMQ
+// worker while the web app runs on Workers, or Cloudflare Containers. Returns the file that shows it.
+function processHost(repo: Repo, w: Wrangler | null): string | null {
+  const config = repo.files.find((f) => /^(fly(\.[\w-]+)?\.toml|render\.yaml|railway\.(json|toml)|\.railway\/railway\.ts|Procfile|cloudbuild\.yaml|app\.yaml)$/.test(f));
+  if (config) return config;
+  const deploy = repo.find(/\.(sh|ya?ml)$/).find((f) => /gcloud run (deploy|jobs)|\bfly(ctl)? deploy\b/.test(repo.read(f) ?? ""));
+  if (deploy) return deploy;
+  return w && scopes(w).some((s) => s.node?.containers) ? w.file : null;
+}
+
+// Whether vite.config stops a build that has no CLOUDFLARE_ENV, as the one in cloudflare.md does, so a
+// script that builds without it fails at once instead of deploying the top-level Worker.
+function viteRequiresEnv(repo: Repo): boolean {
+  const file = ["vite.config.ts", "vite.config.mts", "vite.config.js", "vite.config.mjs"].find((f) => repo.exists(f));
+  const text = file ? mask(repo.read(file) ?? "", false) : "";
+  return /!\s*process\.env\.CLOUDFLARE_ENV\b[^;{}]*\)\s*(?:\{\s*)?(?:this\.error|throw)\b|assert\s*\(\s*process\.env\.CLOUDFLARE_ENV\b/.test(text);
+}
 
 // ---------------------------------------------------------------------------------------------
 
@@ -227,6 +250,7 @@ function scriptFindings(repo: Repo, w: Wrangler | null): Finding[] {
     if (deploy && usesVitePlugin(repo) && /\b(react-router|vite)\s+build\b/.test(expanded)) {
       const target = deploy[1].match(/(?:--env|-e)[=\s]+([\w-]+)/)?.[1];
       const built = expanded.match(/CLOUDFLARE_ENV=([\w-]+)/)?.[1];
+      const guarded = viteRequiresEnv(repo);
       if (target && built && target !== built) {
         findings.push({
           id: "cloudflare/build-env-mismatch",
@@ -238,15 +262,30 @@ function scriptFindings(repo: Repo, w: Wrangler | null): Finding[] {
           fix: `Build with CLOUDFLARE_ENV=${target}, then run wrangler deploy without --env.`,
           docs: `${GUIDE}#set-up-development-and-deploys`,
         });
-      } else if (!built && hasEnvs) {
+      } else if (target && !built) {
+        // --env doesn't choose what a Vite plugin build deploys: the build's CLOUDFLARE_ENV does
         findings.push({
           id: "cloudflare/build-env-mismatch",
-          severity: "error",
+          severity: guarded ? "warning" : "error",
           file: "package.json",
           line,
-          message: `The "${name}" script builds without CLOUDFLARE_ENV, so wrangler deploy publishes the top-level Worker, named "${w!.config.name}", with only the top-level bindings.`,
+          message: guarded
+            ? `The "${name}" script deploys with --env ${target} and builds without CLOUDFLARE_ENV. The build follows CLOUDFLARE_ENV, not --env, so the script only works when the shell that runs it sets CLOUDFLARE_ENV=${target}; without it, vite.config stops the build.`
+            : `The "${name}" script deploys with --env ${target} and builds without CLOUDFLARE_ENV. The build follows CLOUDFLARE_ENV, not --env, so unless the shell sets CLOUDFLARE_ENV=${target}, wrangler deploys the top-level Worker${w ? `, named "${w.config.name}",` : ""} with only the top-level bindings.`,
+          error: guarded ? undefined : "No bindings found.",
+          fix: `Build with CLOUDFLARE_ENV=${target} in the script, then run wrangler deploy without --env.`,
+          docs: `${GUIDE}#set-up-development-and-deploys`,
+        });
+      } else if (!built && hasEnvs && !guarded) {
+        // a script meant to run as CLOUDFLARE_ENV=staging npm run deploy is fine, which the script can't see
+        findings.push({
+          id: "cloudflare/build-env-mismatch",
+          severity: "warning",
+          file: "package.json",
+          line,
+          message: `The "${name}" script builds without CLOUDFLARE_ENV, and vite.config doesn't require it. When the shell that runs the script doesn't set CLOUDFLARE_ENV, wrangler deploy publishes the top-level Worker, named "${w!.config.name}", with only the top-level bindings.`,
           error: "No bindings found.",
-          fix: 'Build each environment with its own variable, such as "CLOUDFLARE_ENV=production react-router build && wrangler deploy".',
+          fix: `Run it as CLOUDFLARE_ENV=staging npm run ${name}, and add the require-cloudflare-env plugin from the vite.config.ts in ${REF} so a build without it stops, or set CLOUDFLARE_ENV in the script.`,
           docs: `${GUIDE}#set-up-development-and-deploys`,
         });
       }
@@ -288,15 +327,17 @@ function scriptFindings(repo: Repo, w: Wrangler | null): Finding[] {
   return findings;
 }
 
-function codeFindings(repo: Repo): Finding[] {
+function codeFindings(repo: Repo, elsewhere: string | null): Finding[] {
   const findings: Finding[] = [];
   const deps = repo.dependencies();
   const hasAdapter = Object.keys(deps).some((d) => d.startsWith("@prisma/adapter-"));
   let prismaReported = false;
 
   for (const file of repo.sourceFiles()) {
-    const text = repo.read(file);
-    if (!text) continue;
+    const source = repo.read(file);
+    if (!source) continue;
+    // comments blanked, so a note about renderToPipeableStream or new Worker() isn't a use of it
+    const text = mask(source, false);
 
     if (/(^|\/)entry\.server\.[jt]sx?$/.test(file) && /\brenderToPipeableStream\b/.test(text)) {
       findings.push({
@@ -369,11 +410,15 @@ function codeFindings(repo: Repo): Finding[] {
     if (/from\s+["']bullmq["']/.test(text) && /new\s+Worker\s*\(/.test(text)) {
       findings.push({
         id: "cloudflare/long-running-worker",
-        severity: "error",
+        severity: elsewhere ? "warning" : "error",
         file,
         line: lineOf(text, /new\s+Worker\s*\(/),
-        message: "A BullMQ worker waits for jobs in a process that runs all the time. A Worker only runs while it handles a request or another event, so this has nowhere to run.",
-        fix: "Move the jobs to Workflows or Queues, or to a queue that calls the app over HTTP, such as Inngest.",
+        message: elsewhere
+          ? `A BullMQ worker waits for jobs in a process that runs all the time, which a Worker can't be. ${elsewhere} sets up a host that can run it, so this works only if the worker starts there, from an entry file the Worker never imports.`
+          : "A BullMQ worker waits for jobs in a process that runs all the time. A Worker only runs while it handles a request or another event, so this has nowhere to run.",
+        fix: elsewhere
+          ? `Start the worker only on the host ${elsewhere} configures, or move the jobs to Workflows or Queues.`
+          : "Move the jobs to Workflows or Queues, or to a queue that calls the app over HTTP, such as Inngest.",
         docs: `${GUIDE}#replace-background-and-scheduled-actions`,
       });
     }
@@ -425,13 +470,15 @@ function codeFindings(repo: Repo): Finding[] {
 export const cloudflare: CheckModule = {
   platform: "cloudflare",
   title: "Cloudflare",
-  detect: (repo) => CONFIG_FILES.some((f) => repo.exists(f)) || "@cloudflare/vite-plugin" in repo.dependencies() || "wrangler" in repo.dependencies(),
-  // Workers never run the template's Dockerfile unless the config declares Containers, has no cron
-  // processes, and never sends SIGTERM: cloudflare/long-running-worker reports a BullMQ worker instead
+  detect: runsOnWorkers,
+  // Workers never run the template's Dockerfile, have no cron processes, and never send SIGTERM:
+  // cloudflare/long-running-worker reports a BullMQ worker instead. That holds only while nothing else
+  // runs processes: with Containers, or a Fly.io, Render, Railway, or Cloud Run config beside wrangler,
+  // the Dockerfile, the worker, and its scripts may run there, so their common findings stand.
   suppresses: (repo) => {
     const w = readWrangler(repo);
-    const containers = !!w && !("error" in w) && scopes(w).some((s) => s.node?.containers);
-    return [...(containers ? [] : ["common/migrate-on-start"]), "common/cron-script-exit", "common/worker-sigterm"];
+    if (processHost(repo, w && !("error" in w) ? w : null)) return [];
+    return ["common/migrate-on-start", "common/cron-script-exit", "common/worker-sigterm"];
   },
   run: (repo) => {
     const findings: Finding[] = [];
@@ -448,7 +495,8 @@ export const cloudflare: CheckModule = {
     } else if (w) {
       findings.push(...configFindings(repo, w));
     }
-    findings.push(...scriptFindings(repo, w && !("error" in w) ? w : null), ...codeFindings(repo));
+    const config = w && !("error" in w) ? w : null;
+    findings.push(...scriptFindings(repo, config), ...codeFindings(repo, processHost(repo, config)));
     return findings;
   },
 };

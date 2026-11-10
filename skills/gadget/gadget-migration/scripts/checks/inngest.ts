@@ -1,7 +1,7 @@
 // Checks for apps moving to Inngest. references/platforms/inngest.md explains each one.
 import { DOCS, type CheckModule, type Finding, type Repo } from "./types.ts";
 import { lineAt, lineOf } from "./read-config.ts";
-import { skipString, skipTemplate, closing, props, calls, nextToken, blank, transactionSpans, type Prop } from "./source-scan.ts";
+import { skipString, skipTemplate, closing, props, calls, nextToken, blank, blocks, mask, transactionSpans, type Prop } from "./source-scan.ts";
 
 const GUIDE = `${DOCS}/inngest`;
 
@@ -74,22 +74,34 @@ function functionsIn(repo: Repo, clients: string[]): InngestFunction[] {
   return out;
 }
 
-// The text of a value, following an identifier to the `const NAME = ...` that defines it.
+// The text of a value, following an identifier to the `const NAME = ...` that defines it, or to
+// `exports.NAME = ...` or `module.exports = { NAME: ... }` in a CommonJS module.
 function resolve(repo: Repo, file: string, value: string): string {
   if (!/^[\w$]+$/.test(value)) return value;
+  const name = value.replace(/\$/g, "\\$");
+  const assignment = new RegExp(`(?:(?:const|let|var)\\s+${name}\\s*(?::[^=]+)?|\\b(?:module\\.)?exports\\.${name}\\s*)=\\s*`);
   for (const f of [file, ...repo.sourceFiles().filter((x) => x !== file)]) {
     const text = repo.read(f) ?? "";
-    const m = new RegExp(`(?:const|let|var)\\s+${value.replace(/\$/g, "\\$")}\\s*(?::[^=]+)?=\\s*`).exec(text);
-    if (!m) continue;
-    const start = m.index + m[0].length;
-    if ("[{(".includes(text[start])) {
-      const end = closing(text, start);
-      if (end > 0) return text.slice(start, end + 1);
+    // match in code only, then read the value from the text, where the indexes are the same
+    const code = mask(text, false);
+    const m = assignment.exec(code);
+    if (m) {
+      const start = m.index + m[0].length;
+      if ("[{(".includes(text[start])) {
+        const end = closing(text, start);
+        if (end > 0) return text.slice(start, end + 1);
+      }
+      return text.slice(start, text.indexOf("\n", start));
     }
-    return text.slice(start, text.indexOf("\n", start));
+    const exported = /\bmodule\.exports\s*=\s*\{/.exec(code);
+    const prop = exported ? props(text, exported.index + exported[0].length - 1).find((p) => p.key === value && p.value !== value) : undefined;
+    if (prop) return prop.value;
   }
   return value;
 }
+
+// An import of one of the inngest package's adapters, such as inngest/express or inngest/next, by import or require.
+const ADAPTER_IMPORT = /(?:\bfrom\s+|\brequire\s*\(\s*|\bimport\s*\(\s*)["']inngest\/[\w/-]+["']/;
 
 // Every array passed to serve() or connect() as `functions`, as text. Null when one of them isn't
 // an array literal the script can read, such as Object.values(all).
@@ -99,7 +111,7 @@ function servedArrays(repo: Repo): string[] | null {
   let served = false;
   for (const file of repo.sourceFiles()) {
     const text = repo.read(file) ?? "";
-    if (!/from\s+["']inngest\/[\w/-]+["']/.test(text)) continue;
+    if (!ADAPTER_IMPORT.test(text)) continue;
     for (const call of [...calls(text, "\\bserve"), ...calls(text, "\\bconnect")]) {
       const open = nextToken(text, call.open + 1);
       if (text[open] !== "{") continue;
@@ -195,14 +207,53 @@ function sentEvents(repo: Repo, clients: string[]): SentEvent[] {
   return out;
 }
 
+interface Declaration {
+  name: string;
+  at: number;
+  // true or false when the declaration says, or the name of the variable it copies
+  bigint: boolean | string;
+}
+
+// Declarations of names in a file and what they say about bigint: a typed name ("shopId: bigint" in a
+// parameter or type) or a const, let, or var, typed by its annotation or its initializer.
+function declarations(code: string): Declaration[] {
+  const out: Declaration[] = [];
+  for (const m of code.matchAll(/\b(?:const|let|var)\s+(?:([\w$]+)\s*(?::\s*([\w$]+)\s*)?=\s*([^;\n]*)|\{([^}=]*)\}\s*(?::[^=]*)?=)|([\w$]+)\s*\??\s*:\s*([\w$]+)/g)) {
+    const at = m.index!;
+    if (m[6]) out.push({ name: m[5], at, bigint: /^bigint$/i.test(m[6]) });
+    else if (m[4] !== undefined) {
+      // const { shopId } = ...: the script can't see the type, so the name no longer means an earlier bigint
+      for (const part of m[4].split(",")) {
+        const local = part.split(":").pop()!.trim();
+        if (/^[\w$]+$/.test(local)) out.push({ name: local, at, bigint: false });
+      }
+    } else {
+      const init = m[3].trim();
+      const bigint = m[2] ? /^bigint$/i.test(m[2]) : /^BigInt\s*\(|^\d+n\b/.test(init) ? true : /^[\w$]+$/.test(init) ? init : false;
+      out.push({ name: m[1], at, bigint });
+    }
+  }
+  return out;
+}
+
 function bigintFindings(sent: SentEvent[]): Finding[] {
   const findings: Finding[] = [];
   for (const event of sent) {
     if (!event.data) continue;
     const { text, file } = event;
-    // the nearest declaration of a name before the send says its type: "shopId: bigint" or "const shopId = BigInt(...)"
-    const declarations = [...text.matchAll(/([\w$]+)\s*\??\s*:\s*([\w$]+)|(?:const|let)\s+([\w$]+)\s*=\s*(BigInt)\(/g)].map((m) => ({ name: m[1] ?? m[3], bigint: /^(bigint|BigInt)$/.test(m[2] ?? m[4]), at: m.index! }));
-    const isBigint = (name: string, at: number) => declarations.filter((d) => d.name === name && d.at < at).pop()?.bigint === true;
+    // The nearest declaration of a name before the send, in a block that also holds the send, says its
+    // type. A parameter belongs to its function, and a property in a type such as { shopId: bigint } to
+    // its braces, so neither reaches a const with the same name elsewhere.
+    const code = mask(text);
+    const decls = declarations(code);
+    const scopes = blocks(code);
+    const visible = (d: number, at: number) => scopes.every(([a, b]) => !(d > a && d < b) || (at > a && at < b));
+    const isBigint = (name: string, at: number, depth = 0): boolean => {
+      const d = decls.filter((x) => x.name === name && x.at < at && visible(x.at, at)).pop();
+      if (!d) return false;
+      if (typeof d.bigint === "string") return depth < 5 && d.bigint !== name && isBigint(d.bigint, d.at, depth + 1);
+      return d.bigint;
+    };
     const visit = (open: number) => {
       for (const prop of props(text, open)) {
         const value = prop.value;

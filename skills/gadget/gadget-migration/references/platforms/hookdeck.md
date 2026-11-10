@@ -13,14 +13,14 @@ node path/to/skills/gadget-migration/scripts/preflight.ts path/to/new-app --plat
 | Check | What it catches |
 |---|---|
 | `hookdeck/source-webhook-secret` | `--source-webhook-secret` in a setup script. For a Shopify source it checks a header Shopify never sends. |
-| `hookdeck/destination-path` | A `--destination-url` with a path, which Hookdeck doubles. |
+| `hookdeck/destination-path` | A `--destination-url` with a path while the URIs in `shopify.app.toml` carry one too, which Hookdeck doubles. One route for every topic, with the bare source URL as every URI and the path only in the destination, passes. |
 | `hookdeck/dedupe-window-seconds` | A deduplicate window of 3600 or less, which Hookdeck reads as milliseconds. |
 | `hookdeck/retry-5xx-only` | A retry rule limited to `5xx`, so a `404` from a wrong path never retries. |
 | `hookdeck/transform-rule` | A transformation on a Shopify connection, which breaks the HMAC. |
 | `hookdeck/filter-replaces-rules` | `hookdeck gateway connection upsert` with a filter flag and no retry flag. It replaces the whole rules array. |
 | `hookdeck/filter-syntax` | A shop filter written as a plain array (matches nothing) or with `$in`, `$startsWith`, or `$endsWith` (matches substrings). |
 | `hookdeck/hand-written-filter` | Store domains written into a filter by hand, where two sides can drift apart. |
-| `hookdeck/toml-uri` | An `hkdk.events` URI with `<source-id>` left in, or with no path after the source id. |
+| `hookdeck/toml-uri` | An `hkdk.events` URI with `<source-id>` left in, or with no path after the source id while the destination URL has none either or other URIs have one. With no destination in the repository, a bare URI is an error only when the app has several webhook routes. |
 | `hookdeck/body-before-hmac` | A route that parses or re-serializes the body before Shopify's HMAC check. |
 | `hookdeck/no-hookdeck-signature` | A webhook route behind Hookdeck that doesn't check `x-hookdeck-signature`. |
 | `hookdeck/processed-webhook` | No table of processed webhook ids, or no job that deletes old rows. |

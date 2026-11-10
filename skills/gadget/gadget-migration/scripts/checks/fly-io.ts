@@ -1,7 +1,8 @@
 // Checks for apps moving to Fly.io. references/platforms/fly-io.md explains each one.
 import { DOCS, type CheckModule, type Finding, type Repo } from "./types.ts";
 import { keyLine, lineAt, lineOf, parseDockerfile, parseToml } from "./read-config.ts";
-import { dockerfileCmd, expandScripts, startOverrideFindings } from "./common.ts";
+import { dockerfileCmd, dockerfilePath, expandScripts, startOverrideFindings } from "./common.ts";
+import { closing, mask } from "./source-scan.ts";
 
 const GUIDE = `${DOCS}/fly-io`;
 const REF = "references/platforms/fly-io.md";
@@ -30,6 +31,14 @@ function flyConfigs(repo: Repo, findings: Finding[]): FlyConfig[] {
     }
   }
   return out;
+}
+
+// The Dockerfile a config builds: [build] dockerfile, or Dockerfile. Null for a prebuilt image or a
+// buildpack builder, where there's no Dockerfile to read.
+function dockerfileOf(config: any): string | null {
+  const build = config.build && typeof config.build === "object" ? config.build : {};
+  if (build.image || build.builder || build.buildpacks) return null;
+  return dockerfilePath(build.dockerfile);
 }
 
 const lower = (value: unknown) => (typeof value === "string" ? value.toLowerCase() : value);
@@ -64,13 +73,15 @@ function signalHandlers(repo: Repo): SignalUse[] {
   const out: SignalUse[] = [];
   for (const file of repo.sourceFiles()) {
     const text = repo.read(file) ?? "";
-    const term = /process\.(on|once)\(\s*["']SIGTERM["']/.test(text);
+    // process.on("SIGTERM", ...), or a loop such as for (const s of ["SIGTERM", "SIGINT"]) process.on(s, ...)
+    if (!/process\.(on|once)\(/.test(text)) continue;
+    const term = /["'`]SIGTERM["'`]/.test(text);
     if (!term) continue;
     out.push({
       file,
-      line: lineOf(text, /process\.(on|once)\(\s*["']SIGTERM["']/) ?? 1,
+      line: lineOf(text, /process\.(on|once)\(\s*["'`]SIGTERM["'`]/) ?? lineOf(text, /["'`]SIGTERM["'`]/) ?? 1,
       term,
-      int: /process\.(on|once)\(\s*["']SIGINT["']/.test(text),
+      int: /["'`]SIGINT["'`]/.test(text),
       worker: /new Worker\s*\(/.test(text),
     });
   }
@@ -180,7 +191,8 @@ function configFindings(repo: Repo, { file, text, config }: FlyConfig, handlers:
     });
   }
   const hasMigrations = repo.files.some((f) => /(^|\/)prisma\/migrations\/[^/]+\/migration\.sql$/.test(f));
-  const cmdMigrates = !Object.keys(processes).length && /migrate deploy|db push/.test(expandScripts(repo, dockerfileCmd(repo)?.command ?? ""));
+  const dockerfile = dockerfileOf(config);
+  const cmdMigrates = !Object.keys(processes).length && !!dockerfile && /migrate deploy|db push/.test(expandScripts(repo, dockerfileCmd(repo, dockerfile)?.command ?? ""));
   if (hasMigrations && !config.deploy?.release_command && !migrators.length && !cmdMigrates) {
     findings.push({
       id: "fly-io/no-release-command",
@@ -195,8 +207,8 @@ function configFindings(repo: Repo, { file, text, config }: FlyConfig, handlers:
   }
 
   // [processes] commands replace the Dockerfile's CMD, which ran prisma generate in the template
-  for (const [group, command] of Object.entries(processes)) {
-    const found = startOverrideFindings(repo, "fly-io", file, keyLine(processes, group), String(command), `${GUIDE}#set-up-development-and-deploys`);
+  for (const [group, command] of dockerfile ? Object.entries(processes) : []) {
+    const found = startOverrideFindings(repo, "fly-io", file, keyLine(processes, group), String(command), `${GUIDE}#set-up-development-and-deploys`, dockerfile!);
     if (found.length) {
       findings.push(found[0]);
       break;
@@ -238,11 +250,12 @@ function configFindings(repo: Repo, { file, text, config }: FlyConfig, handlers:
 
 // [build.args] that the Dockerfile never declares with ARG never reach the build
 function buildArgFindings(repo: Repo, configs: FlyConfig[]): Finding[] {
-  const dockerfile = repo.read("Dockerfile");
-  if (!dockerfile) return [];
-  const steps = parseDockerfile(dockerfile);
   const findings: Finding[] = [];
   for (const { file, config } of configs) {
+    const path = dockerfileOf(config);
+    const dockerfile = path ? repo.read(path) : null;
+    if (!dockerfile) continue;
+    const steps = parseDockerfile(dockerfile);
     const args = config.build?.args && typeof config.build.args === "object" ? config.build.args : {};
     for (const name of Object.keys(args)) {
       if (steps.some((s) => s.instruction === "ARG" && s.args.split(/[=\s]/)[0] === name)) continue;
@@ -251,8 +264,8 @@ function buildArgFindings(repo: Repo, configs: FlyConfig[]): Finding[] {
         severity: "error",
         file,
         line: keyLine(args, name),
-        message: `${name} is a build arg, but the Dockerfile has no ARG ${name}, so the build never sees it. Docker's BuildKit prints no warning, and the value is empty.`,
-        fix: `Add ARG ${name} to the Dockerfile before the step that reads it, such as RUN npm run build.`,
+        message: `${name} is a build arg, but ${path} has no ARG ${name}, so the build never sees it. Docker's BuildKit prints no warning, and the value is empty.`,
+        fix: `Add ARG ${name} to ${path} before the step that reads it, such as RUN npm run build.`,
         docs: `${GUIDE}#environment-variables`,
       });
     }
@@ -262,54 +275,59 @@ function buildArgFindings(repo: Repo, configs: FlyConfig[]): Finding[] {
 
 function cronFindings(repo: Repo, configs: FlyConfig[]): Finding[] {
   const findings: Finding[] = [];
-  const dockerfile = repo.read("Dockerfile");
-  const commands = configs.flatMap(({ file, config }) =>
-    Object.entries(config.processes && typeof config.processes === "object" ? config.processes : {})
-      .filter(([, command]) => /supercronic/.test(String(command)))
-      .map(([group, command]) => ({ file, line: keyLine(config.processes, group), command: String(command) }))
-  );
-  if (!commands.length) return findings;
-
-  if (dockerfile !== null && !/supercronic/.test(dockerfile)) {
-    const first = commands[0];
-    findings.push({
-      id: "fly-io/supercronic-missing",
-      severity: "error",
-      file: first.file,
-      line: first.line,
-      message: `"${first.command}" runs Supercronic, and the Dockerfile never installs it, so the cron Machine can't start its command.`,
-      fix: "Download Supercronic in the Dockerfile with its checksum, as in the Dockerfile in references/platforms/fly-io.md.",
-      docs: `${GUIDE}#set-up-development-and-deploys`,
-    });
-  }
-
-  // CRON_TZ on an alpine image without tzdata
-  if (!dockerfile) return findings;
-  const steps = parseDockerfile(dockerfile);
-  const base = steps.filter((s) => s.instruction === "FROM").pop()?.args ?? "";
-  const alpine = /alpine/.test(base);
-  const tzdata = steps.some((s) => s.instruction === "RUN" && /apk add[^&;|]*\btzdata\b/.test(s.args));
-  if (!alpine || tzdata) return findings;
-  const seen = new Set<string>();
-  for (const { command } of commands) {
-    const path = command.split(/\s+/).filter((w, i) => i > 0 && !w.startsWith("-")).pop();
+  // the supercronic commands, grouped by the Dockerfile their config builds
+  const byDockerfile = new Map<string, { file: string; line: number | undefined; command: string }[]>();
+  for (const { file, config } of configs) {
+    const path = dockerfileOf(config);
     if (!path) continue;
-    const local = [path.replace(/^\/app\//, ""), path.replace(/^\//, ""), path.split("/").pop()!].find((p) => repo.exists(p));
-    if (!local || seen.has(local)) continue;
-    seen.add(local);
-    const text = repo.read(local) ?? "";
-    const match = text.match(/^\s*CRON_TZ\s*=\s*(\S+)/m);
-    if (!match || /^(UTC|Etc\/UTC)$/.test(match[1])) continue;
-    findings.push({
-      id: "fly-io/cron-tz",
-      severity: "error",
-      file: local,
-      line: lineAt(text, match.index!),
-      message: `The crontab sets CRON_TZ=${match[1]}, and the ${base.split(/\s+/)[0]} image has no time zone data, so Supercronic exits and runs no jobs.`,
-      error: `unknown time zone ${match[1]}`,
-      fix: "Add tzdata to the apk add line in the Dockerfile, such as RUN apk add --no-cache openssl tzdata.",
-      docs: `${GUIDE}#replace-scheduled-actions`,
-    });
+    for (const [group, command] of Object.entries(config.processes && typeof config.processes === "object" ? config.processes : {})) {
+      if (!/supercronic/.test(String(command))) continue;
+      byDockerfile.set(path, [...(byDockerfile.get(path) ?? []), { file, line: keyLine(config.processes, group), command: String(command) }]);
+    }
+  }
+  const seen = new Set<string>();
+  for (const [path, commands] of byDockerfile) {
+    const dockerfile = repo.read(path);
+    if (dockerfile === null) continue;
+    if (!/supercronic/.test(dockerfile)) {
+      const first = commands[0];
+      findings.push({
+        id: "fly-io/supercronic-missing",
+        severity: "error",
+        file: first.file,
+        line: first.line,
+        message: `"${first.command}" runs Supercronic, and ${path} never installs it, so the cron Machine can't start its command.`,
+        fix: `Download Supercronic in ${path} with its checksum, as in the Dockerfile in references/platforms/fly-io.md.`,
+        docs: `${GUIDE}#set-up-development-and-deploys`,
+      });
+    }
+
+    // CRON_TZ on an alpine image without tzdata
+    const steps = parseDockerfile(dockerfile);
+    const base = steps.filter((s) => s.instruction === "FROM").pop()?.args ?? "";
+    const alpine = /alpine/.test(base);
+    const tzdata = steps.some((s) => s.instruction === "RUN" && /apk add[^&;|]*\btzdata\b/.test(s.args));
+    if (!alpine || tzdata) continue;
+    for (const { command } of commands) {
+      const crontab = command.split(/\s+/).filter((w, i) => i > 0 && !w.startsWith("-")).pop();
+      if (!crontab) continue;
+      const local = [crontab.replace(/^\/app\//, ""), crontab.replace(/^\//, ""), crontab.split("/").pop()!].find((p) => repo.exists(p));
+      if (!local || seen.has(local)) continue;
+      seen.add(local);
+      const text = repo.read(local) ?? "";
+      const match = text.match(/^\s*CRON_TZ\s*=\s*(\S+)/m);
+      if (!match || /^(UTC|Etc\/UTC)$/.test(match[1])) continue;
+      findings.push({
+        id: "fly-io/cron-tz",
+        severity: "error",
+        file: local,
+        line: lineAt(text, match.index!),
+        message: `The crontab sets CRON_TZ=${match[1]}, and the ${base.split(/\s+/)[0]} image has no time zone data, so Supercronic exits and runs no jobs.`,
+        error: `unknown time zone ${match[1]}`,
+        fix: `Add tzdata to the apk add line in ${path}, such as RUN apk add --no-cache openssl tzdata.`,
+        docs: `${GUIDE}#replace-scheduled-actions`,
+      });
+    }
   }
   return findings;
 }
@@ -342,7 +360,8 @@ function duplicateAppFindings(configs: FlyConfig[]): Finding[] {
 function launchFindings(repo: Repo, configs: FlyConfig[]): Finding[] {
   const apps = configs.map((c) => c.config.app).filter((a): a is string => typeof a === "string");
   if (!apps.length) return [];
-  const generated = /LABEL\s+fly_launch_runtime=/.test(repo.read("Dockerfile") ?? "");
+  const dockerfiles = new Set(configs.map((c) => dockerfileOf(c.config)).filter((p): p is string => !!p));
+  const generated = [...dockerfiles].some((p) => /LABEL\s+fly_launch_runtime=/.test(repo.read(p) ?? ""));
   const findings: Finding[] = [];
   for (const file of repo.find(/^shopify\.app(\.[\w-]+)?\.toml$/)) {
     const text = repo.read(file) ?? "";
@@ -406,16 +425,24 @@ function ioredisFindings(repo: Repo): Finding[] {
   for (const file of repo.sourceFiles()) {
     const text = repo.read(file) ?? "";
     if (!/from\s+["']ioredis["']/.test(text)) continue;
-    for (const match of text.matchAll(/new (?:IORedis|Redis)\s*\(([^;]*?)\)\s*;?/g)) {
-      if (/family/.test(match[1])) continue;
+    const code = mask(text, false);
+    for (const match of code.matchAll(/new (?:IORedis|Redis)\s*\(/g)) {
+      const open = match.index! + match[0].length - 1;
+      const close = closing(text, open);
+      if (close < 0) continue;
+      const args = text.slice(open, close + 1);
+      // family in the options or the URL (?family=6), or in an options object the call names, such as new IORedis(url, options)
+      if (/family/.test(args)) continue;
+      const named = [...args.matchAll(/[(,]\s*([A-Za-z_$][\w$]*)\s*(?=[,)])/g)].map((m) => m[1]);
+      if (named.some((name) => new RegExp(`\\b(?:const|let|var)\\s+${name}\\b[^=]*=\\s*\\{[^;]*\\bfamily\\b`).test(text))) continue;
       findings.push({
         id: "fly-io/ioredis-family",
-        severity: "error",
+        severity: "warning",
         file,
         line: lineAt(text, match.index!),
-        message: `ioredis ${version} looks up IPv4 addresses only unless family is set, and Fly.io's private network, where Upstash Redis lives, is IPv6 only.`,
+        message: `ioredis ${version} looks up IPv4 addresses only unless family is set, and Fly.io's private network, where Upstash Redis lives, is IPv6 only. The script can't see your Redis URL, so a URL that ends with ?family=6 already fixes it.`,
         error: "getaddrinfo ENOTFOUND",
-        fix: "Pass family: 6 (or 0) in the ioredis options, or upgrade ioredis to 5.8.2 or later.",
+        fix: "Pass family: 6 (or 0) in the ioredis options, add ?family=6 to the Redis URL, or upgrade ioredis to 5.8.2 or later.",
         docs: `${GUIDE}#create-a-redis-database-for-your-queue`,
       });
     }

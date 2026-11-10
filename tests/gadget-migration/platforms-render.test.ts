@@ -2,7 +2,7 @@
 // The Render checks in scripts/checks/render.ts against fixtures/preflight/render-bad and render-good,
 // and the Blueprint in references/platforms/render.md against the same checks.
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -89,6 +89,42 @@ describe("the Blueprint in render.md", () => {
     writeFileSync(join(dir, "render.yaml"), block("render.md", "render.yaml"));
     const findings = renderFindings(dir);
     assert.deepEqual(findings.map((f) => `${f.severity} ${f.id}`), ["manual render/cron-job"]);
+  });
+});
+
+describe("the Workflows start worker in render.md", () => {
+  it("isn't reported for SIGTERM, because it returns the worker to the code that starts it", () => {
+    const dir = copyOf("render-good");
+    mkdirSync(join(dir, "app/jobs"), { recursive: true });
+    writeFileSync(join(dir, "app/jobs/reconcile-all-shops.server.ts"), block("render.md", "app/jobs/reconcile-all-shops.server.ts"));
+    const ids = preflight(dir, ["render"]).findings.map((f) => f.id);
+    assert.ok(!ids.includes("common/worker-sigterm"), ids.join(", "));
+    assert.ok(!ids.includes("render/workflows-start"), ids.join(", "));
+  });
+});
+
+describe("a service with dockerfilePath", () => {
+  const template = 'FROM node:22-alpine\nWORKDIR /app\nCOPY . .\nRUN npm run build\nCMD ["npm", "run", "docker-start"]\n';
+  const withService = (dir: string, path: string) => {
+    const yaml = readFileSync(join(dir, "render.yaml"), "utf8").replace("    dockerCommand: npm run start\n", `    dockerCommand: npm run start\n    dockerfilePath: ${path}\n`);
+    writeFileSync(join(dir, "render.yaml"), yaml);
+  };
+
+  it("reads that Dockerfile for prisma generate, not the root one", () => {
+    const dir = copyOf("render-good");
+    writeFileSync(join(dir, "Dockerfile.render"), readFileSync(join(dir, "Dockerfile"), "utf8"));
+    writeFileSync(join(dir, "Dockerfile"), template);
+    withService(dir, "./Dockerfile.render");
+    assert.deepEqual(renderFindings(dir).map(where), []);
+  });
+
+  it("reports prisma-generate when that Dockerfile skips it, even though the root one runs it", () => {
+    const dir = copyOf("render-good");
+    writeFileSync(join(dir, "Dockerfile.render"), template);
+    withService(dir, "Dockerfile.render");
+    const found = renderFindings(dir);
+    assert.deepEqual(found.map(where), ["render/prisma-generate render.yaml:10"]);
+    assert.match(found[0].message, /nothing in Dockerfile\.render runs prisma generate/);
   });
 });
 

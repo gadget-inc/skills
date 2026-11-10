@@ -74,10 +74,59 @@ export function openRepo(root: string): Repo {
   };
 }
 
+// A manual finding when the directory isn't the app's own: a workspace root whose apps live in
+// subdirectories, or a --platform whose files aren't here. Every check reads package.json, the
+// Dockerfile, and platform config at the root, so either case would otherwise print "No findings".
+function directoryFindings(root: string, repo: Repo, only: string[] | undefined): Finding[] {
+  let pkg: any = {};
+  try {
+    pkg = JSON.parse(repo.read("package.json") ?? "{}");
+  } catch {}
+  const workspace = pkg?.workspaces ? "package.json has workspaces" : repo.exists("pnpm-workspace.yaml") ? "it has a pnpm-workspace.yaml" : null;
+  const missing = MODULES.filter((m) => m.platform !== "common" && only?.includes(m.platform) && !m.detect(repo));
+  if (!workspace && !missing.length) return [];
+
+  // directories below this one with a package.json, nearest first, and the platforms each one looks like
+  const atRoot = new Set(MODULES.filter((m) => m.platform !== "common" && m.detect(repo)).map((m) => m.platform));
+  const below = repo
+    .find(/\/package\.json$/)
+    .map((f) => f.slice(0, -"/package.json".length))
+    .sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b))
+    .slice(0, 30)
+    .map((dir) => {
+      const sub = openRepo(join(root, dir));
+      return { dir, platforms: MODULES.filter((m) => m.platform !== "common" && m.detect(sub)).map((m) => m.platform), start: "start" in sub.scripts() };
+    });
+  const named = (dirs: string[]) => (dirs.length > 3 ? `${dirs.slice(0, 3).join(", ")}, and ${dirs.length - 3} more` : dirs.join(", "));
+  const forced = only?.length ? ` --platform ${only.join(",")}` : "";
+
+  const elsewhere = below.filter((b) => missing.some((m) => b.platforms.includes(m.platform))).map((b) => b.dir);
+  const notHere: Finding = {
+    id: "common/app-directory",
+    severity: "manual",
+    message: `--platform ${missing.map((m) => m.platform).join(",")} was given, and nothing in this directory looks like a ${missing.map((m) => m.title).join(" or ")} app, so those checks had nothing to read${elsewhere.length ? `. ${named(elsewhere)} ${elsewhere.length > 1 ? "do" : "does"}` : ""}.`,
+    fix: elsewhere.length
+      ? `Run preflight on ${elsewhere[0]}, the app's own directory, instead${forced ? `, with${forced}` : ""}.`
+      : "Run preflight in the app's own directory, the one with its package.json and the platform's config file, or add that config first.",
+  };
+  if (missing.length && elsewhere.length) return [notHere];
+  // Shopify's template lists its extensions as workspaces, so a root that is the app itself doesn't count
+  const apps = workspace ? below.filter((b) => b.platforms.some((p) => !atRoot.has(p)) || (b.start && !("start" in repo.scripts()) && !repo.exists("Dockerfile"))).map((b) => b.dir) : [];
+  if (!apps.length) return missing.length ? [notHere] : [];
+  return [
+    {
+      id: "common/app-directory",
+      severity: "manual",
+      message: `This is a workspace root (${workspace}), and preflight reads package.json, the Dockerfile, and platform config only in the directory it's given, so it didn't check ${named(apps)}.`,
+      fix: `Run preflight on each app's own directory instead, such as ${apps[0]}${forced ? `, with${forced}` : ""}.`,
+    },
+  ];
+}
+
 export function preflight(root: string, only?: string[]): { platforms: CheckModule[]; findings: Finding[] } {
   const repo = openRepo(root);
   const platforms = MODULES.filter((m) => m.platform === "common" || (only ? only.includes(m.platform) : m.detect(repo)));
-  const findings: Finding[] = [];
+  const findings: Finding[] = [...directoryFindings(root, repo, only)];
   for (const module of platforms) {
     try {
       findings.push(...module.run(repo));

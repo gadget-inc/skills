@@ -3,6 +3,7 @@
   "regions": ["iad1"],
   "schedules": {
     "prune-audit-logs": { "schedule": "0 2 * * *", "path": "/schedules/prune-audit-logs" },
-    "reconcile-shops": { "schedule": "0 * * * *", "path": "/schedules/reconcile-shops", "requestMethod": "GET" }
+    "reconcile-shops": { "schedule": "0 * * * *", "path": "/schedules/reconcile-shops", "requestMethod": "GET" },
+    "prune-sessions": { "schedule": "30 3 * * *", "path": "/schedules/prune-sessions" }
   }
 }

@@ -2,6 +2,7 @@
 import { DOCS, type CheckModule, type Finding, type Repo } from "./types.ts";
 import { dockerCommand, keyLine, lineAt, lineOf, parseDockerfile, parseYaml } from "./read-config.ts";
 import { dockerfileCmd, expandScripts, startOverrideFindings } from "./common.ts";
+import { arithmetic } from "./railway.ts";
 
 const GUIDE = `${DOCS}/google-cloud-run`;
 const REF = "references/platforms/google-cloud-run.md";
@@ -256,6 +257,23 @@ function secretFindings(commands: Gcloud[], findings: Finding[]) {
   }
 }
 
+// Cloud Tasks' longest dispatch deadline for an HTTP target
+const MAX_DEADLINE = 1800;
+
+// The seconds a dispatchDeadline expression holds: a number expression such as 15 * 60, or names of
+// constants the same file defines that way. Null when the file doesn't say.
+function deadlineSeconds(text: string, expression: string, depth = 0): number | null {
+  const unquoted = expression.trim().replace(/^(["'])(\d+)\1$/, "$2");
+  let unknown = false;
+  const substituted = unquoted.replace(/(?<![\w$])[A-Za-z_$][\w$]*/g, (name) => {
+    const value = depth < 3 ? text.match(new RegExp(`\\b(?:const|let|var)\\s+${name.replace(/\$/g, "\\$")}\\s*(?::\\s*\\w+\\s*)?=\\s*([^;\\n]+)`))?.[1] : undefined;
+    const seconds = value === undefined ? null : deadlineSeconds(text, value, depth + 1);
+    if (seconds === null) unknown = true;
+    return String(seconds);
+  });
+  return unknown ? null : arithmetic(substituted);
+}
+
 function timeoutFindings(repo: Repo, commands: Gcloud[], findings: Finding[]) {
   const sources = repo.sourceFiles().filter((f) => /createTask\s*\(/.test(repo.read(f) ?? ""));
   if (!sources.length) return;
@@ -268,10 +286,15 @@ function timeoutFindings(repo: Repo, commands: Gcloud[], findings: Finding[]) {
   let deadline = 600;
   let where = { file: sources[0], line: lineOf(repo.read(sources[0]) ?? "", /createTask\s*\(/) };
   let set = false;
+  let unread: { file: string; line: number; expression: string } | null = null;
   for (const file of sources) {
     const text = repo.read(file) ?? "";
-    for (const match of text.matchAll(/dispatchDeadline\s*:\s*\{\s*seconds\s*:\s*([\d\s*]+)/g)) {
-      const value = match[1].split("*").reduce((product, n) => product * Number(n.trim() || 1), 1);
+    for (const match of text.matchAll(/dispatchDeadline\s*:\s*(\{\s*seconds\s*:\s*([^,}\n]+)|[^,}\n]+)/g)) {
+      const value = match[2] === undefined ? null : deadlineSeconds(text, match[2]);
+      if (value === null) {
+        unread ??= { file, line: lineAt(text, match.index!), expression: (match[2] ?? match[1]).trim() };
+        continue;
+      }
       if (!set || value > deadline) {
         deadline = value;
         where = { file, line: lineAt(text, match.index!) };
@@ -280,7 +303,29 @@ function timeoutFindings(repo: Repo, commands: Gcloud[], findings: Finding[]) {
     }
   }
   const minutes = (s: number) => (s % 60 === 0 ? `${s / 60} minutes` : `${s} seconds`);
-  if (deadline < timeout) {
+  const flagValue = (s: number) => minutes(s).replace(" minutes", "m").replace(" seconds", "s");
+  if (unread) {
+    findings.push({
+      id: "google-cloud-run/timeout-deadline",
+      severity: "manual",
+      file: unread.file,
+      line: unread.line,
+      message: `The dispatch deadline is ${unread.expression}, which the script can't work out, so it couldn't compare it with ${serviceName(worker)}'s ${minutes(timeout)} --timeout.`,
+      fix: `Check that the deadline matches the worker's --timeout, at most 30 minutes: a shorter deadline retries a job while the first copy still runs, and a longer one gets a 504 at ${minutes(timeout)}.`,
+      docs: `${GUIDE}#check-your-host-s-time-limits`,
+    });
+  } else if (deadline < timeout && deadline >= MAX_DEADLINE) {
+    findings.push({
+      id: "google-cloud-run/timeout-deadline",
+      severity: "warning",
+      file: worker.file,
+      line: worker.line,
+      message: `Cloud Tasks waits ${minutes(deadline)} for a response, the most it allows, and ${serviceName(worker)} lets a request run ${minutes(timeout)}. A job that runs past ${minutes(deadline)} is retried while Cloud Run keeps running the first copy, so two copies run at once.`,
+      error: "DEADLINE_EXCEEDED",
+      fix: `Lower ${serviceName(worker)}'s --timeout to ${flagValue(deadline)} to match the deadline, and split jobs that run longer than that.`,
+      docs: `${GUIDE}#check-your-host-s-time-limits`,
+    });
+  } else if (deadline < timeout) {
     findings.push({
       id: "google-cloud-run/timeout-deadline",
       severity: "error",
@@ -288,7 +333,9 @@ function timeoutFindings(repo: Repo, commands: Gcloud[], findings: Finding[]) {
       line: where.line,
       message: `Cloud Tasks waits ${minutes(deadline)} for a response${set ? "" : " (its default)"}, and ${serviceName(worker)} lets a request run ${minutes(timeout)}. A job that runs past ${minutes(deadline)} is retried while Cloud Run keeps running the first copy, so two copies run at once.`,
       error: "DEADLINE_EXCEEDED",
-      fix: `Set dispatchDeadline above your longest job and at or above the worker's --timeout, such as dispatchDeadline: { seconds: ${Math.min(timeout, 1800)} } (30 minutes at most).`,
+      fix: timeout > MAX_DEADLINE
+        ? `Set dispatchDeadline: { seconds: ${MAX_DEADLINE} }, the most Cloud Tasks allows, and lower the worker's --timeout to 30m to match.`
+        : `Set dispatchDeadline above your longest job and at or above the worker's --timeout, such as dispatchDeadline: { seconds: ${timeout} } (30 minutes at most).`,
       docs: `${GUIDE}#check-your-host-s-time-limits`,
     });
   } else if (deadline > timeout) {
@@ -299,7 +346,7 @@ function timeoutFindings(repo: Repo, commands: Gcloud[], findings: Finding[]) {
       line: worker.line,
       message: `Tasks wait up to ${minutes(deadline)} for a response, and ${serviceName(worker)} ends a request after ${minutes(timeout)}${flag(worker, "timeout") ? "" : " (Cloud Run's default)"}. A job that runs longer gets a 504 at ${minutes(timeout)} and is retried from the start, failing at the same point every time.`,
       error: "504",
-      fix: `Deploy ${serviceName(worker)} with --timeout=${minutes(deadline).replace(" minutes", "m").replace(" seconds", "s")} or more, matching the dispatch deadline.`,
+      fix: `Deploy ${serviceName(worker)} with --timeout=${flagValue(deadline)} or more, matching the dispatch deadline.`,
       docs: `${GUIDE}#check-your-host-s-time-limits`,
     });
   }

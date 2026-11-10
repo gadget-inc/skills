@@ -98,6 +98,39 @@ describe("supabase checks on the reference's complete examples", () => {
   });
 });
 
+describe("supabase checks on an app that uses Supabase for Auth or Storage only", () => {
+  // the Shopify template's Session migration, with the database on another host
+  const app = (extra: Record<string, string> = {}) => ({
+    "package.json": JSON.stringify({ dependencies: { "@prisma/client": "6.19.3", "@supabase/supabase-js": "2.80.0" } }),
+    "prisma/migrations/20240530213853_create_session_table/migration.sql": 'CREATE TABLE "Session" ("id" TEXT NOT NULL, "accessToken" TEXT NOT NULL);\n',
+    "app/services/files.server.ts": 'import { createClient } from "@supabase/supabase-js";\nexport const storage = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SECRET_KEY!).storage;\n',
+    ".env.example": "SUPABASE_URL=https://abcdefghijklmnop.supabase.co\nDATABASE_URL=postgres://app:pw@db.render.com:5432/app\n",
+    ...extra,
+  });
+
+  it("is detected, and doesn't run the database checks on migrations meant for another host", () => {
+    const repo = openRepo(tempApp(app()));
+    assert.equal(supabase.detect(repo), true);
+    assert.deepEqual(findings(tempApp(app())).map((f) => f.id), []);
+  });
+
+  it("still runs the Storage and Auth checks", () => {
+    const out = findings(tempApp(app({ "scripts/cleanup.sql": "delete from storage.objects where bucket_id = 'old';\n" })));
+    assert.deepEqual(out.map((f) => `${f.id} ${f.severity}`), ["supabase/storage-sql-delete error"]);
+  });
+
+  it("runs the database checks once a Supabase database URL or a supabase folder shows the database is there", () => {
+    for (const extra of [
+      { ".env.example": "DATABASE_URL=postgres://app_server.abcdefghijklmnop:pw@aws-0-us-east-1.pooler.supabase.com:5432/postgres\n" },
+      { ".env.example": "DIRECT_URL=postgres://app_server:pw@db.abcdefghijklmnop.supabase.co:5432/postgres\n" },
+      { "supabase/config.toml": "[api]\nenabled = true\n" },
+    ]) {
+      const out = findings(tempApp(app(extra)));
+      assert.ok(out.some((f) => f.id === "supabase/rls-missing"), Object.keys(extra)[0]);
+    }
+  });
+});
+
 describe("supabase checks: edge cases", () => {
   const exposedTable = { [`${M}1_t.sql`]: "create table widget (id bigint primary key);\n" };
 

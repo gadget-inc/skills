@@ -30,6 +30,8 @@ node path/to/skills/gadget-migration/scripts/preflight.ts path/to/new-app --plat
 
 It needs Node 22.18+ or 23.6+ and no dependencies, and it exits with 1 when it finds an error. Each finding gives the file and line, the error you'd see, the fix, and the docs section. Findings under "Check by hand" are things only a dashboard, CLI, or database can show. `--json` prints the same findings for another script.
 
+Give it the app's own directory, the one with the app's `package.json`. In a monorepo that's a folder such as `apps/web`, not the workspace root: every check reads `package.json`, the Dockerfile, and the platform's config only in the directory it's given. Pointed at a workspace root, or given a `--platform` whose config isn't there, it reports `common/app-directory` and names the folder to run it on.
+
 Then check the database as the app sees it. Use the exact URL the app connects with, pooled or not, because the role and the pooler are what you're checking:
 
 ```bash

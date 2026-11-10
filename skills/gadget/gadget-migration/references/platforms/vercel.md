@@ -16,14 +16,14 @@ node path/to/skills/gadget-migration/scripts/preflight.ts path/to/new-app --plat
 |---|---|---|
 | `vercel/functions-react-router` | A `functions` section in a React Router app. Every key fails the build, even one under `api/` | |
 | `vercel/functions-no-match` | A `functions` pattern that matches no file. Next.js builds anyway, and the `maxDuration` applies to nothing | |
-| `vercel/schedule-unprotected` | A schedule's `path` route that doesn't check `CRON_SECRET`. The path is public | |
-| `vercel/schedule-method` | A schedule's route that can't take the method Schedules send: `POST` unless `requestMethod` says `GET`. A route written for the older Cron Jobs, which sent `GET`, has only a `loader` | |
+| `vercel/schedule-unprotected` | A schedule's `path` route that doesn't check `CRON_SECRET`, in its own code or a file it imports with a relative path. The path is public | |
+| `vercel/schedule-method` | A schedule's route that can't take the method Schedules send: `POST` unless `requestMethod` says `GET`. A route written for the older Cron Jobs, which sent `GET`, has only a `loader`. A Pages Router route's default export takes every method | |
 | `vercel/schedules-before-cutover` | Schedules in `vercel.json`, which start with the first production deployment that declares them | `vercel schedules list --environment production`: each one should say inactive until the switch |
 | `vercel/inngest-max-duration` | The route Inngest calls without a `maxDuration`, so every step stops at 300 seconds | |
 | `vercel/webhook-waituntil` | A webhook route that hands its work to `waitUntil`, which never retries | |
 | `vercel/pg-pool` | A `pg` pool not registered with `attachDatabasePool` | |
 | `vercel/multipart-upload` | File uploads parsed on the server, which stop at 4.5MB | |
-| `vercel/deployment-url` | A deployment or branch URL, such as `my-app-4f9c2a1bc-my-team.vercel.app`, in a `shopify.app*.toml` | |
+| `vercel/deployment-url` | A deployment URL, with a 9-character hash before the team slug as in `my-app-4f9c2a1bc-my-team.vercel.app`, or a `-git-` branch URL, in a `shopify.app*.toml`. A production alias such as `my-app-studio42.vercel.app` passes | |
 | `vercel/preview-database` | A build script that runs migrations, which preview builds run too | `vercel env ls`: no `DATABASE_URL` or `DATABASE_URL_UNPOOLED` row may list Production and Preview together |
 | `vercel/deployment-protection` | Standard Protection on the staging domain | `curl -s -o /dev/null -w "%{http_code}\n" https://staging.example.com/auth/login` prints the app's `200`, not `401` |
 

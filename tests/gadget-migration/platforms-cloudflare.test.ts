@@ -55,8 +55,8 @@ describe("Cloudflare checks on cloudflare-bad", () => {
     ["cloudflare/no-placement", "warning", "wrangler.jsonc", 7],
     ["cloudflare/hyperdrive-caching", "manual", "wrangler.jsonc", 8],
     ["cloudflare/r2-cors", "manual", "wrangler.jsonc", 8],
-    // "deploy" builds with no environment, "deploy:production" builds staging
-    ["cloudflare/build-env-mismatch", "error", "package.json", 7],
+    // "deploy" builds with no environment and vite.config.ts doesn't require one, "deploy:production" builds staging
+    ["cloudflare/build-env-mismatch", "warning", "package.json", 7],
     ["cloudflare/build-env-mismatch", "error", "package.json", 8],
     ["cloudflare/types-strict-vars", "warning", "vite.config.ts", 7],
     ["cloudflare/types-without-env", "warning", "worker-configuration.d.ts", 5],
@@ -105,6 +105,89 @@ describe("Cloudflare checks on cloudflare-bad", () => {
     // the BullMQ worker has no SIGTERM handler, but on Workers it has nowhere to run at all
     assert.ok(commonOnly.includes("common/worker-sigterm"));
     assert.ok(!all.includes("common/worker-sigterm"));
+  });
+});
+
+describe("Cloudflare detection and the common findings it drops", () => {
+  // the template's files that only fail on Workers, and a BullMQ worker with no SIGTERM handler
+  function nodeApp(dir: string) {
+    write(dir, "app/entry.server.tsx", 'import { renderToPipeableStream } from "react-dom/server";\nexport default renderToPipeableStream;\n');
+    write(dir, "app/db.server.ts", 'import { PrismaClient } from "@prisma/client";\nexport default new PrismaClient();\n');
+    write(dir, "app/worker.server.ts", 'import { Worker } from "bullmq";\nconst worker = new Worker("external", async () => {}, { connection: { url: process.env.REDIS_URL } });\n');
+  }
+
+  it("doesn't claim a Fly.io app that installs wrangler only to manage R2 buckets", () => {
+    const dir = tempDir();
+    nodeApp(dir);
+    write(dir, "fly.toml", 'app = "my-app"\n');
+    write(dir, "package.json", JSON.stringify({ scripts: { "r2:cors": "wrangler r2 bucket cors set my-app-files --file r2-cors.json" }, dependencies: { "@prisma/client": "6.19.3", bullmq: "5.61.0" }, devDependencies: { wrangler: "4.160.0" } }, null, 2));
+    const { platforms, findings } = preflight(dir);
+    assert.ok(!platforms.some((p) => p.platform === "cloudflare"), platforms.map((p) => p.platform).join(","));
+    assert.deepEqual(findings.filter((f) => f.id.startsWith("cloudflare/")).map(where), []);
+    // nothing drops the worker's missing SIGTERM handler, which matters on Fly.io
+    assert.ok(findings.some((f) => f.id === "common/worker-sigterm"));
+  });
+
+  it("claims an app with a wrangler config or the Vite plugin", () => {
+    for (const files of [{ "wrangler.jsonc": '{ "name": "my-app" }' }, { "package.json": JSON.stringify({ devDependencies: { "@cloudflare/vite-plugin": "1.68.0" } }) }] as Record<string, string>[]) {
+      const dir = tempDir();
+      write(dir, "package.json", "{}");
+      for (const [path, text] of Object.entries(files)) write(dir, path, text);
+      assert.ok(preflight(dir).platforms.some((p) => p.platform === "cloudflare"), Object.keys(files).join(","));
+    }
+  });
+
+  it("keeps the worker's common findings, and only warns about the worker, when another host can run it", () => {
+    const dir = tempDir();
+    nodeApp(dir);
+    write(dir, "wrangler.jsonc", '{ "name": "my-app", "main": "workers/app.ts" }');
+    write(dir, "fly.toml", 'app = "my-app-worker"\n');
+    write(dir, "package.json", JSON.stringify({ dependencies: { bullmq: "5.61.0" }, devDependencies: { wrangler: "4.160.0" } }));
+    const findings = preflight(dir).findings;
+    assert.equal(findings.find((f) => f.id === "cloudflare/long-running-worker")?.severity, "warning");
+    assert.match(findings.find((f) => f.id === "cloudflare/long-running-worker")!.message, /fly\.toml/);
+    assert.ok(findings.some((f) => f.id === "common/worker-sigterm"));
+  });
+
+  it("ignores a note about renderToPipeableStream in a comment", () => {
+    const dir = tempDir();
+    write(dir, "wrangler.jsonc", '{ "name": "my-app" }');
+    write(dir, "package.json", "{}");
+    write(dir, "app/entry.server.tsx", '// Workers have no Node streams, so this renders with renderToReadableStream, not renderToPipeableStream\nimport { renderToReadableStream } from "react-dom/server";\n');
+    assert.deepEqual(cloudflareFindings(dir).map(where), []);
+  });
+});
+
+describe("cloudflare/build-env-mismatch", () => {
+  // the reference's vite.config.ts, which stops a build without CLOUDFLARE_ENV
+  const guarded = () => block("cloudflare.md", "vite.config.ts");
+  function app(scripts: Record<string, string>, vite?: string) {
+    const dir = tempDir("cloudflare-good");
+    const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+    pkg.scripts = scripts;
+    writeFileSync(join(dir, "package.json"), JSON.stringify(pkg, null, 2));
+    if (vite) write(dir, "vite.config.ts", vite);
+    return cloudflareFindings(dir).filter((f) => f.id === "cloudflare/build-env-mismatch");
+  }
+
+  it("accepts a deploy script meant to run as CLOUDFLARE_ENV=staging npm run deploy:worker when vite.config requires it", () => {
+    assert.deepEqual(app({ build: "react-router build", "deploy:worker": "npm run build && wrangler deploy" }, guarded()).map(where), []);
+  });
+
+  it("warns about the same script when nothing stops a build without CLOUDFLARE_ENV", () => {
+    const found = app({ build: "react-router build", "deploy:worker": "npm run build && wrangler deploy" });
+    assert.deepEqual(found.map((f) => `${f.severity} ${where(f)}`), ["warning cloudflare/build-env-mismatch package.json:7"]);
+  });
+
+  it("reports --env with no CLOUDFLARE_ENV in the build, as a warning when vite.config stops that build", () => {
+    const scripts = { "deploy:staging": "react-router build && wrangler deploy --env staging" };
+    assert.deepEqual(app(scripts).map((f) => f.severity), ["error"]);
+    assert.deepEqual(app(scripts, guarded()).map((f) => f.severity), ["warning"]);
+  });
+
+  it("still reports a build for one environment deployed as another, guard or not", () => {
+    const found = app({ "deploy:production": "CLOUDFLARE_ENV=staging react-router build && wrangler deploy --env production" }, guarded());
+    assert.deepEqual(found.map((f) => f.severity), ["error"]);
   });
 });
 

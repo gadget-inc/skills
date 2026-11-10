@@ -1,7 +1,7 @@
 // Checks for apps moving to Render. references/platforms/render.md explains each one.
 import { DOCS, type CheckModule, type Finding, type Repo } from "./types.ts";
 import { keyLine, lineAt, lineOf, parseYaml } from "./read-config.ts";
-import { dockerfileCmd, expandScripts, startOverrideFindings } from "./common.ts";
+import { dockerfileCmd, dockerfilePath, expandScripts, startOverrideFindings } from "./common.ts";
 
 const GUIDE = `${DOCS}/render`;
 const FILE = "render.yaml";
@@ -43,12 +43,19 @@ const isProduction = (r: Resource) => !/stag|dev|preview|test|qa|sandbox/i.test(
 const name = (r: Resource) => String(r.node.name ?? r.node.type);
 const lineOfKey = (r: Resource, key: string) => keyLine(r.node, key) ?? r.line;
 
+// The Dockerfile a Docker service builds: dockerfilePath, inside rootDir when the service sets one.
+function dockerfileOf(repo: Repo, r: Resource): string {
+  const path = dockerfilePath(r.node.dockerfilePath);
+  const inRoot = typeof r.node.rootDir === "string" && r.node.rootDir.trim() ? dockerfilePath(r.node.dockerfilePath, dockerfilePath(r.node.rootDir)) : null;
+  return inRoot && !repo.exists(path) && repo.exists(inRoot) ? inRoot : path;
+}
+
 // The command a service starts with: its own, or the Dockerfile's CMD for a Docker service without one.
 function startCommand(repo: Repo, r: Resource): { command: string; key?: string } | null {
   if (typeof r.node.dockerCommand === "string") return { command: r.node.dockerCommand, key: "dockerCommand" };
   if (typeof r.node.startCommand === "string") return { command: r.node.startCommand, key: "startCommand" };
   if (r.node.runtime === "docker") {
-    const cmd = dockerfileCmd(repo);
+    const cmd = dockerfileCmd(repo, dockerfileOf(repo, r));
     if (cmd) return { command: cmd.command };
   }
   return null;
@@ -190,7 +197,7 @@ function blueprintFindings(repo: Repo, doc: any): Finding[] {
   const overridden = services.find((r) => r.node.runtime === "docker" && typeof r.node.dockerCommand === "string" && r.node.type !== "worker") ??
     services.find((r) => r.node.runtime === "docker" && typeof r.node.dockerCommand === "string");
   if (overridden) {
-    findings.push(...startOverrideFindings(repo, "render", FILE, lineOfKey(overridden, "dockerCommand"), overridden.node.dockerCommand, `${GUIDE}#set-up-development-and-deploys`));
+    findings.push(...startOverrideFindings(repo, "render", FILE, lineOfKey(overridden, "dockerCommand"), overridden.node.dockerCommand, `${GUIDE}#set-up-development-and-deploys`, dockerfileOf(repo, overridden)));
   }
 
   // the web service and webhooks

@@ -1,7 +1,7 @@
 // Checks for apps that receive Shopify webhooks through Hookdeck. references/platforms/hookdeck.md explains each one.
 import { DOCS, type CheckModule, type Finding, type Repo } from "./types.ts";
 import { lineAt, lineOf } from "./read-config.ts";
-import { calls } from "./source-scan.ts";
+import { calls, mask } from "./source-scan.ts";
 
 const GUIDE = `${DOCS}/hookdeck`;
 const TOML = /(^|\/)shopify\.app(\.[\w-]+)?\.toml$/;
@@ -36,22 +36,6 @@ function setupFindings(repo: Repo): Finding[] {
       });
     }
     for (const cmd of commands(text)) {
-      const url = /--destination-url[\s=]+["']?(https?:\/\/[^\s"'\\]+)/.exec(cmd.text);
-      if (url && !/--destination-path-forwarding-disabled[\s=]+["']?true/.test(cmd.text)) {
-        const path = new URL(url[1]).pathname;
-        if (path !== "/" && path !== "") {
-          findings.push({
-            id: "hookdeck/destination-path",
-            severity: "error",
-            file,
-            line: at(cmd.index + url.index),
-            message: `The destination URL has the path ${path}, and Hookdeck appends the path Shopify sent after the source URL, so a webhook for that path arrives at ${path}${path} and your app answers 404.`,
-            error: `404 for ${path}${path}`,
-            fix: "Give the destination only your app's origin, such as https://app.example.com, and keep the path in each uri in shopify.app.toml.",
-            docs: `${GUIDE}#point-shopify-at-hookdeck`,
-          });
-        }
-      }
       if (/--rule-filter-(headers|body|path|query)\b/.test(cmd.text) && !/--rule-retry-strategy\b/.test(cmd.text) && /\b(upsert|update)\b/.test(cmd.text)) {
         findings.push({
           id: "hookdeck/filter-replaces-rules",
@@ -141,27 +125,128 @@ function dedupeFinding(file: string, line: number, value: string): Finding {
   };
 }
 
-function tomlFindings(repo: Repo): Finding[] {
-  const findings: Finding[] = [];
+interface SourceUri {
+  file: string;
+  line: number;
+  uri: string;
+  // the path after the source id, such as "/webhooks/orders/updated", or ""
+  path: string;
+  placeholder: boolean;
+}
+
+// Every hkdk.events URI in a shopify.app*.toml.
+function sourceUris(repo: Repo): SourceUri[] {
+  const out: SourceUri[] = [];
   for (const file of repo.find(TOML)) {
     const text = repo.read(file) ?? "";
     for (const m of text.matchAll(/uri\s*=\s*"(https:\/\/hkdk\.events\/[^"]*)"/g)) {
-      const rest = m[1].slice("https://hkdk.events/".length);
-      const [source, ...path] = rest.split("/");
-      const placeholder = /[<>{}]/.test(source) || /source[-_]?id/i.test(source);
-      if (!placeholder && path.join("/") !== "") continue;
+      const [source, ...path] = m[1].slice("https://hkdk.events/".length).split("/");
+      const rest = path.join("/").replace(/\/+$/, "");
+      out.push({ file, line: lineAt(text, m.index!), uri: m[1], path: rest ? `/${rest}` : "", placeholder: /[<>{}]/.test(source) || /source[-_]?id/i.test(source) });
+    }
+  }
+  return out;
+}
+
+interface Destination {
+  file: string;
+  line: number;
+  url: string;
+  // the URL's path, or "" for an origin
+  path: string;
+  // false when the command turns path forwarding off, so the URL gets every webhook as it is
+  forwarding: boolean;
+}
+
+// Every --destination-url in a `hookdeck connection` command in the setup files.
+function destinations(repo: Repo): Destination[] {
+  const out: Destination[] = [];
+  for (const file of repo.find(SETUP).filter((f) => !f.includes("node_modules") && !/(^|\/)package-lock\.json$/.test(f))) {
+    const text = repo.read(file) ?? "";
+    if (!/hookdeck/i.test(text)) continue;
+    for (const cmd of commands(text)) {
+      const url = /--destination-url[\s=]+["']?(https?:\/\/[^\s"'\\]+)/.exec(cmd.text);
+      if (!url) continue;
+      let path = "";
+      try {
+        path = new URL(url[1]).pathname.replace(/\/+$/, "");
+      } catch {
+        continue;
+      }
+      out.push({ file, line: lineAt(text, cmd.index + url.index), url: url[1], path, forwarding: !/--destination-path-forwarding-disabled[\s=]+["']?true/.test(cmd.text) });
+    }
+  }
+  return out;
+}
+
+// Route files that receive webhooks, such as app/routes/webhooks.orders.updated.tsx or app/api/webhooks/route.ts.
+const webhookRoutes = (repo: Repo) => repo.sourceFiles().filter((f) => /(^|\/)(routes|pages|api)\/(.*\/)?[^/]*webhook/i.test(f));
+
+// Hookdeck delivers to the destination URL followed by whatever path came after the source id in the URI
+// Shopify called. So the path belongs in exactly one of the two: in each toml URI, with an origin as the
+// destination, or, for an app with one route that handles every topic, in the destination URL alone.
+function pathFindings(repo: Repo): Finding[] {
+  const findings: Finding[] = [];
+  const uris = sourceUris(repo);
+  const dests = destinations(repo);
+  const forwarded = dests.filter((d) => d.forwarding);
+  const routed = uris.filter((u) => u.path);
+  const routes = webhookRoutes(repo);
+
+  for (const d of forwarded.filter((x) => x.path)) {
+    // every URI is the bare source URL, so the destination's path is the only one: one route takes every topic
+    if (uris.length && !routed.length) continue;
+    const doubled = `${d.path}${routed[0]?.path ?? d.path}`;
+    findings.push({
+      id: "hookdeck/destination-path",
+      severity: routed.length ? "error" : "warning",
+      file: d.file,
+      line: d.line,
+      message: routed.length
+        ? `The destination URL has the path ${d.path}, and ${routed[0].uri} in ${routed[0].file} has a path too. Hookdeck appends the path after the source id to the destination URL, so that webhook arrives at ${doubled} and your app answers 404.`
+        : `The destination URL has the path ${d.path}, and no shopify.app*.toml here shows the subscription URIs. If they carry a path after the source id too, Hookdeck appends it to the destination URL, and a webhook arrives at ${doubled}.`,
+      error: `404 for ${doubled}`,
+      fix: "Keep the path in one place: give the destination only your app's origin, such as https://app.example.com, with the path in each uri in shopify.app.toml, or, for one route that handles every topic, the bare source URL as every uri.",
+      docs: `${GUIDE}#point-shopify-at-hookdeck`,
+    });
+  }
+
+  for (const u of uris) {
+    const fix = "Use your source's URL followed by the path your app serves the topic on, such as https://hkdk.events/src_abc123/webhooks/orders/updated, with only your app's origin as the destination URL.";
+    if (u.placeholder) {
       findings.push({
         id: "hookdeck/toml-uri",
         severity: "error",
-        file,
-        line: lineAt(text, m.index!),
-        message: placeholder
-          ? `${m[1]} still has a placeholder where the Hookdeck source id goes, so Shopify delivers to a source that doesn't exist.`
-          : `${m[1]} has no path after the source id, so Hookdeck delivers this topic to your app's origin, not to the route that handles it.`,
-        fix: "Use your source's URL followed by the path your app serves the topic on, such as https://hkdk.events/src_abc123/webhooks/orders/updated.",
+        file: u.file,
+        line: u.line,
+        message: `${u.uri} still has a placeholder where the Hookdeck source id goes, so Shopify delivers to a source that doesn't exist.`,
+        fix,
         docs: `${GUIDE}#point-shopify-at-hookdeck`,
       });
+      continue;
     }
+    if (u.path) continue;
+    // path forwarding is off everywhere, so the destination URL alone decides where webhooks go
+    if (dests.length && !forwarded.length) continue;
+    // a single endpoint: the destination URL carries the path of the route that takes every topic
+    if (!routed.length && forwarded.some((d) => d.path)) continue;
+    const destination = forwarded[0];
+    let severity: "error" | "warning";
+    let message: string;
+    if (routed.length) {
+      severity = "error";
+      message = `${u.uri} has no path after the source id while ${routed[0].uri} has one, so Hookdeck delivers this topic to the destination URL itself, not to the route that handles it.`;
+    } else if (destination) {
+      severity = routes.length ? "error" : "warning";
+      message = `${u.uri} has no path after the source id, and the destination URL ${destination.url} (${destination.file}) has none either, so Hookdeck delivers this topic to your app's origin, not to the route that handles it.`;
+    } else {
+      severity = routes.length > 1 ? "error" : "warning";
+      message =
+        routes.length > 1
+          ? `${u.uri} has no path after the source id, and the app has ${routes.length} webhook routes. Hookdeck delivers each topic to the destination URL followed by that path, so with none every topic reaches the same URL and at most one of the routes gets webhooks.`
+          : `${u.uri} has no path after the source id, so Hookdeck delivers this topic to the destination URL as it is. That works only if the destination URL, which isn't in this repository, ends with the path of a route that handles every topic.`;
+    }
+    findings.push({ id: "hookdeck/toml-uri", severity, file: u.file, line: u.line, message, fix, docs: `${GUIDE}#point-shopify-at-hookdeck` });
   }
   return findings;
 }
@@ -171,11 +256,13 @@ function routeFindings(repo: Repo): Finding[] {
   const behindHookdeck = hasHookdeckToml(repo);
   for (const file of repo.sourceFiles()) {
     const text = repo.read(file) ?? "";
-    const auth = /authenticate\.webhook\s*\(|verifyWebhook\s*\(|webhooks\.validate\s*\(/.exec(text);
+    // match calls in code only: "never call request.json() before authenticate.webhook" in a comment isn't one
+    const code = mask(text);
+    const auth = /authenticate\.webhook\s*\(|verifyWebhook\s*\(|webhooks\.validate\s*\(/.exec(code);
     if (!auth) continue;
     // the body read or rewritten before the HMAC check
     const early = [...calls(text, "\\brequest\\.(?:json|formData)")].find((c) => c.index < auth.index);
-    const restring = /(?:verifyWebhook|validate)\s*\([^)]*JSON\.stringify\s*\(/.exec(text);
+    const restring = /(?:verifyWebhook|validate)\s*\([^)]*JSON\.stringify\s*\(/.exec(code);
     if (early || restring) {
       findings.push({
         id: "hookdeck/body-before-hmac",
@@ -190,7 +277,7 @@ function routeFindings(repo: Repo): Finding[] {
         docs: `${GUIDE}#verify-requests-in-your-app`,
       });
     }
-    if (!behindHookdeck || !/authenticate\.webhook\s*\(/.test(text)) continue;
+    if (!behindHookdeck || !/authenticate\.webhook\s*\(/.test(code)) continue;
     const imports = [...text.matchAll(/from\s+["'](\.{1,2}\/[^"']+)["']/g)].map((m) => new URL(m[1], `file:///${file}`).pathname.slice(1));
     const checked = [text, ...imports.flatMap((base) => [base, `${base}.ts`, `${base}.tsx`, `${base}.js`].map((f) => repo.read(f) ?? ""))].some((t) => /x-hookdeck-signature/.test(t));
     if (checked) continue;
@@ -263,5 +350,5 @@ export const hookdeck: CheckModule = {
     repo.sourceFiles().some((f) => /x-hookdeck-signature|api\.hookdeck\.com/.test(repo.read(f) ?? "")) ||
     hasHookdeckToml(repo) ||
     repo.find(/(^|\/)(package\.json|[\w.-]+\.sh)$/).some((f) => /hookdeck\s+gateway/.test(repo.read(f) ?? "")),
-  run: (repo) => [...setupFindings(repo), ...tomlFindings(repo), ...routeFindings(repo), ...processedWebhookFindings(repo), ...manualFindings(repo)],
+  run: (repo) => [...setupFindings(repo), ...pathFindings(repo), ...routeFindings(repo), ...processedWebhookFindings(repo), ...manualFindings(repo)],
 };

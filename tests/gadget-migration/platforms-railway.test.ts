@@ -2,7 +2,7 @@
 // The Railway checks in scripts/checks/railway.ts against fixtures/preflight/railway-bad and railway-good,
 // and the project file in references/platforms/railway.md against the same checks.
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -103,6 +103,29 @@ describe("the project file in railway.md", () => {
     const dir = copyOf("railway-good");
     writeFileSync(join(dir, "app/services/bucket.server.ts"), block("railway.md", "app/services/bucket.server.ts"));
     assert.deepEqual(railwayFindings(dir).filter((f) => f.file?.startsWith("app/")), []);
+  });
+});
+
+describe("the Dockerfile a service builds", () => {
+  const template = 'FROM node:22-alpine\nWORKDIR /app\nCOPY . .\nRUN npm run build\nCMD ["npm", "run", "docker-start"]\n';
+  const setting = (dir: string, line: string) => {
+    const text = readFileSync(join(dir, IAC), "utf8").replace('    start: "npm run start",\n    preDeploy', `    start: "npm run start",\n    ${line}\n    preDeploy`);
+    writeFileSync(join(dir, IAC), text);
+  };
+
+  it("reads dockerfilePath for prisma generate, not the root Dockerfile", () => {
+    const dir = copyOf("railway-good");
+    writeFileSync(join(dir, "Dockerfile.railway"), template);
+    setting(dir, 'dockerfilePath: "Dockerfile.railway",');
+    assert.deepEqual(railwayFindings(dir).filter((f) => f.id === "railway/prisma-generate").map(where), [`error railway/prisma-generate ${IAC}:19`]);
+  });
+
+  it("skips the check when a builder other than Dockerfile builds the image", () => {
+    const dir = copyOf("railway-good");
+    writeFileSync(join(dir, "Dockerfile"), template);
+    setting(dir, 'builder: "RAILPACK",');
+    // web uses Railpack, so the check moves on to the worker, which still builds from the template's Dockerfile
+    assert.deepEqual(railwayFindings(dir).filter((f) => f.id === "railway/prisma-generate").map(where), [`error railway/prisma-generate ${IAC}:30`]);
   });
 });
 

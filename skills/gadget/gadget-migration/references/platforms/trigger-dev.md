@@ -12,8 +12,8 @@ node path/to/skills/gadget-migration/scripts/preflight.ts path/to/new-app --plat
 
 | Check | What it catches |
 |---|---|
-| `trigger-dev/cli-latest` | `trigger.dev@latest` in a script or CI workflow. Deploys abort as soon as a CLI newer than your SDK ships. |
-| `trigger-dev/version-mismatch`, `trigger-dev/sdk-version` | `@trigger.dev/*` packages at different versions or on `^` ranges that drift apart, and `concurrency` with an SDK older than 4.7.0, which ignores it. |
+| `trigger-dev/cli-latest` | `trigger.dev@latest deploy` in a script, or `trigger.dev@latest` in a CI workflow that deploys. Deploys abort as soon as a CLI newer than your SDK ships. `trigger.dev@latest dev` is fine, and a command the script can't read is a warning. |
+| `trigger-dev/version-mismatch`, `trigger-dev/sdk-version` | `@trigger.dev/*` packages at different versions or on `^` ranges that drift apart, and `concurrency` with an SDK older than 4.7.0, which ignores it: the version the lockfile installs, or with no lockfile an exact pin or a range such as `~4.6.0` that can't reach 4.7.0. |
 | `trigger-dev/max-duration` | No `maxDuration` in `trigger.config.ts`. The type requires it, and the deploy build doesn't typecheck. |
 | `trigger-dev/default-retries` | No `retries` in `trigger.config.ts`: tasks get 3 attempts, and Gadget made 7. |
 | `trigger-dev/prisma-extension` | Tasks that import Prisma, with no `prismaExtension` in the build. |

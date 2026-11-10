@@ -52,6 +52,8 @@ describe("Fly.io checks", () => {
     assert.equal(severity["fly-io/cron-tz"], "error");
     assert.equal(severity["fly-io/web-auto-stop"], "warning");
     assert.equal(severity["fly-io/launch-rewrote-shopify-toml"], "warning");
+    // the script can't see REDIS_URL, which may end with ?family=6
+    assert.equal(severity["fly-io/ioredis-family"], "warning");
     for (const f of own(findings)) {
       assert.ok(f.fix.endsWith("."), `${f.id} fix ends with a period`);
       assert.match(f.docs ?? "", /^https:\/\/docs\.gadget\.dev\/guides\/moving-to-another-platform\/fly-io#/);
@@ -73,6 +75,7 @@ describe("Fly.io checks", () => {
     }
   });
 
+  // app/queues.server.ts sets family after an arrow function in the options, and in a URL
   it("finds nothing in the good fixture, which fixes each one", () => {
     assert.deepEqual(where(own(preflight(fixture("fly-io-good"), ["fly-io"]).findings)), []);
   });
@@ -87,6 +90,54 @@ describe("Fly.io checks", () => {
       const { findings } = preflight(dir, ["fly-io"]);
       assert.deepEqual(where(own(findings)), ["fly-io/kill-timeout fly.toml:3", "fly-io/unreadable-config fly.staging.toml"]);
       assert.equal(findings.find((f) => f.id === "fly-io/unreadable-config")?.severity, "manual");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reads the Dockerfile [build] dockerfile names, not the template's Dockerfile next to it", () => {
+    const files: Record<string, string> = {};
+    for (const b of platformBlocks("fly-io.md")) files[b.path] = b.code;
+    for (const config of ["fly.toml", "fly.staging.toml"]) files[config] = files[config].replace("[build.args]", '[build]\n  dockerfile = "Dockerfile.fly"\n[build.args]');
+    files["Dockerfile.fly"] = files["Dockerfile"];
+    // the template's own Dockerfile: no ARG, no Supercronic, no prisma generate
+    files["Dockerfile"] = 'FROM node:22-alpine\nWORKDIR /app\nCOPY . .\nRUN npm run build\nCMD ["npm", "run", "docker-start"]\n';
+    files["package.json"] = JSON.stringify({ scripts: { start: "react-router-serve ./build/server/index.js" }, dependencies: { "@prisma/client": "6.19.3", prisma: "6.19.3" } });
+    const dir = app(files);
+    try {
+      assert.deepEqual(where(own(preflight(dir, ["fly-io"]).findings)), []);
+      // and a config without [build] dockerfile still reads the template's Dockerfile
+      writeFileSync(join(dir, "fly.staging.toml"), files["fly.staging.toml"].replace('  dockerfile = "Dockerfile.fly"\n', ""));
+      const found = own(preflight(dir, ["fly-io"]).findings);
+      assert.deepEqual(where(found), ["fly-io/build-arg-unused fly.staging.toml:10", "fly-io/prisma-generate fly.staging.toml:24", "fly-io/supercronic-missing fly.staging.toml:27"]);
+      assert.match(found.find((f) => f.id === "fly-io/build-arg-unused")!.message, /but Dockerfile has no ARG/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("follows pnpm build to the prisma generate in the build script", () => {
+    const dir = app({
+      "fly.toml": 'app = "my-app"\nkill_signal = "SIGTERM"\n[processes]\n  web = "pnpm start"\n[http_service]\n  processes = ["web"]\n  auto_stop_machines = "off"\n',
+      Dockerfile: 'FROM node:22-alpine\nCOPY package.json pnpm-lock.yaml ./\nRUN corepack enable && pnpm install --frozen-lockfile\nCOPY . .\nRUN pnpm build\nCMD ["pnpm", "start"]\n',
+      "package.json": JSON.stringify({ scripts: { build: "prisma generate && react-router build", start: "react-router-serve ./build/server/index.js" }, dependencies: { "@prisma/client": "6.19.3", prisma: "6.19.3" } }),
+    });
+    try {
+      assert.deepEqual(where(own(preflight(dir, ["fly-io"]).findings)), []);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("counts a shutdown handler that registers SIGTERM in a loop", () => {
+    const dir = app({
+      "fly.toml": 'app = "my-app"\nkill_signal = "SIGTERM"\nkill_timeout = 300\n',
+      "package.json": JSON.stringify({ dependencies: { bullmq: "5.61.0", ioredis: "5.8.2" } }),
+      "app/queues.server.ts": 'import { Queue } from "bullmq";\nimport IORedis from "ioredis";\nexport const connection = new IORedis(process.env.REDIS_URL!);\nexport const queue = new Queue("q", { connection });\n',
+      "app/entry.server.tsx": 'import { queue } from "./queues.server";\nfor (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, async () => { await queue.close(); });\n',
+    });
+    try {
+      assert.deepEqual(where(own(preflight(dir, ["fly-io"]).findings)), []);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

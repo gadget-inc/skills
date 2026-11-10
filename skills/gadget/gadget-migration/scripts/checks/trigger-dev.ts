@@ -318,6 +318,76 @@ function taskFiles(repo: Repo, config: string | null): string[] {
   return [...seen];
 }
 
+// CLI commands that don't stop on a version mismatch, so trigger.dev@latest is fine for them
+const HARMLESS_COMMANDS = new Set(["dev", "init", "login", "logout", "whoami", "update", "list-profiles", "switch", "mcp", "install-mcp"]);
+
+type Version = [number, number, number];
+const MIN_SDK: Version = [4, 7, 0];
+const parseVersion = (v: string): Version | null => {
+  const m = /(\d+)\.(\d+)\.(\d+)/.exec(v);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+};
+const compare = (a: Version, b: Version) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+
+// The version of a package that the committed lockfile installs, and the lockfile it's in.
+function lockedVersion(repo: Repo, name: string, spec: string): { version: string; file: string } | null {
+  const esc = name.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  const npm = repo.read("package-lock.json");
+  if (npm) {
+    try {
+      const lock = JSON.parse(npm);
+      const version = lock.packages?.[`node_modules/${name}`]?.version ?? lock.dependencies?.[name]?.version;
+      if (typeof version === "string") return { version, file: "package-lock.json" };
+    } catch {
+      // an unreadable lockfile says nothing
+    }
+  }
+  const pnpm = repo.read("pnpm-lock.yaml");
+  if (pnpm) {
+    // importers: { .: { dependencies: { '@trigger.dev/sdk': { specifier: ^4.6.0, version: 4.8.3 } } } }, or a packages key
+    const importer = new RegExp(`^[ \\t]+['"]?${esc}['"]?:[ \\t]*\\n[ \\t]+specifier:[^\\n]*\\n[ \\t]+version:[ \\t]*['"]?(\\d+\\.\\d+\\.\\d+)`, "m").exec(pnpm);
+    const key = new RegExp(`^[ \\t]+['"]?/?${esc}[@/](\\d+\\.\\d+\\.\\d+)`, "m").exec(pnpm);
+    const version = importer?.[1] ?? key?.[1];
+    if (version) return { version, file: "pnpm-lock.yaml" };
+  }
+  const yarn = repo.read("yarn.lock");
+  if (yarn) {
+    // "@trigger.dev/sdk@^4.6.0": then version "4.8.3" (classic) or version: 4.8.3 (Berry)
+    const entries = [...yarn.matchAll(new RegExp(`^"?${esc}@([^\\n]*):[ \\t]*\\n(?:[ \\t]+[^\\n]*\\n)*?[ \\t]+version:?[ \\t]+"?(\\d+\\.\\d+\\.\\d+)`, "gm"))];
+    const entry = entries.find((e) => e[1].includes(spec)) ?? entries[0];
+    if (entry) return { version: entry[2], file: "yarn.lock" };
+  }
+  const bun = repo.read("bun.lock");
+  const version = bun ? new RegExp(`"${esc}@(\\d+\\.\\d+\\.\\d+)"`).exec(bun)?.[1] : undefined;
+  if (version) return { version, file: "bun.lock" };
+  return null;
+}
+
+// The lowest version a range such as ^3.3.0, ~4.6.0, or 4.6.x can't reach, or null when it has no ceiling.
+function ceiling(spec: string): Version | null {
+  const m = /^([\^~])?\s*(\d+)(?:\.(\d+|x|\*))?(?:\.(\d+|x|\*))?$/.exec(spec.trim());
+  if (!m) return null;
+  const [, op, major, minor, patch] = m;
+  const x = (s?: string) => s === undefined || s === "x" || s === "*";
+  if (op === "^") return Number(major) > 0 || x(minor) ? [Number(major) + 1, 0, 0] : [0, Number(minor) + 1, 0];
+  if (x(minor)) return [Number(major) + 1, 0, 0];
+  if (op === "~" || x(patch)) return [Number(major), Number(minor) + 1, 0];
+  return null;
+}
+
+// Why the SDK that installs is older than 4.7.0, which concurrency needs, or null when it isn't or the
+// script can't tell. A range like ^4.6.0 with no lockfile installs the newest 4.x, so it passes.
+function sdkTooOld(repo: Repo, spec: string): string | null {
+  const locked = lockedVersion(repo, "@trigger.dev/sdk", spec);
+  if (locked) {
+    const v = parseVersion(locked.version);
+    return v && compare(v, MIN_SDK) < 0 ? `${locked.file} installs ${locked.version}` : null;
+  }
+  if (/^\d+\.\d+\.\d+$/.test(spec.trim())) return compare(parseVersion(spec)!, MIN_SDK) < 0 ? `package.json pins ${spec}` : null;
+  const top = ceiling(spec);
+  return top && compare(top, MIN_SDK) <= 0 ? `package.json's ${spec} only allows versions below 4.7.0` : null;
+}
+
 function configFindings(repo: Repo, tasks: TaskDef[]): Finding[] {
   const findings: Finding[] = [];
   const config = repo.read(CONFIG);
@@ -403,33 +473,45 @@ function configFindings(repo: Repo, tasks: TaskDef[]): Finding[] {
       docs: `${GUIDE}#deploy-tasks`,
     });
   }
-  const sdk = deps["@trigger.dev/sdk"]?.match(/(\d+)\.(\d+)\.(\d+)/);
-  if (sdk && (Number(sdk[1]) < 4 || (Number(sdk[1]) === 4 && Number(sdk[2]) < 7))) {
+  const spec = deps["@trigger.dev/sdk"];
+  const old = spec ? sdkTooOld(repo, spec) : null;
+  if (old) {
     for (const t of tasks.filter((x) => x.config.has("concurrency"))) {
       findings.push({
         id: "trigger-dev/sdk-version",
         severity: "error",
         file: t.file,
         line: lineAt(t.text, t.config.get("concurrency")!.index),
-        message: `The concurrency option needs @trigger.dev/sdk 4.7.0 or later, and package.json has ${deps["@trigger.dev/sdk"]}.`,
+        message: `The concurrency option needs @trigger.dev/sdk 4.7.0 or later, and ${old}.`,
         fix: "Upgrade @trigger.dev/sdk, @trigger.dev/build, and the CLI together to 4.7.0 or later.",
         docs: `${GUIDE}#define-a-task`,
       });
     }
   }
-  // `npx trigger.dev@latest deploy` aborts as soon as a CLI newer than the pinned packages ships
+  // `npx trigger.dev@latest deploy` aborts as soon as a CLI newer than the pinned packages ships. Other
+  // commands, such as the guide's `npx trigger.dev@latest dev`, don't stop on a version mismatch.
   const places = repo.find(/(^|\/)(package\.json|Dockerfile[\w.-]*|Makefile|[\w.-]+\.sh|\.gitlab-ci\.yml|bitbucket-pipelines\.yml|\.github\/workflows\/[\w.-]+\.ya?ml)$/).filter((f) => !f.includes("node_modules"));
+  const pinned = spec?.replace(/^[\^~]/, "") ?? "4.8.3";
   for (const file of places) {
     const text = repo.read(file) ?? "";
     for (const m of text.matchAll(/trigger\.dev@(latest|beta|next)\b/g)) {
+      const command = /^[ \t]+([a-z][\w-]*)/.exec(text.slice(m.index! + m[0].length))?.[1];
+      if (command && HARMLESS_COMMANDS.has(command)) continue;
+      // a CI workflow or script that installs the latest CLI and deploys with it, as in
+      // npm install -g trigger.dev@latest, then trigger.dev deploy. In package.json, only within one script.
+      const lineEnd = text.indexOf("\n", m.index!);
+      const line = text.slice(text.lastIndexOf("\n", m.index!) + 1, lineEnd < 0 ? text.length : lineEnd);
+      const deploys = command === "deploy" || /\btrigger\.dev(?:@[\w.-]+)?\s+deploy\b/.test(file.endsWith("package.json") ? line : text);
       findings.push({
         id: "trigger-dev/cli-latest",
-        severity: "error",
+        severity: deploys ? "error" : "warning",
         file,
         line: lineAt(text, m.index!),
-        message: `This runs trigger.dev@${m[1]}, which moves to each new CLI release. The CLI refuses to deploy when your @trigger.dev packages are a different version, so deploys start failing the day a new CLI ships.`,
+        message: deploys
+          ? `This deploys with trigger.dev@${m[1]}, which moves to each new CLI release. The CLI refuses to deploy when your @trigger.dev packages are a different version, so deploys start failing the day a new CLI ships.`
+          : `This runs trigger.dev@${m[1]}${command ? ` ${command}` : ""}, which moves to each new CLI release. If it deploys, the deploy starts failing the day a new CLI ships, because the CLI refuses to deploy when your @trigger.dev packages are a different version.`,
         error: "ERROR: Version mismatch detected while running in CI. This won't end well. Aborting.",
-        fix: `Run the version your packages pin, such as npx trigger.dev@${deps["@trigger.dev/sdk"]?.replace(/^[\^~]/, "") ?? "4.8.3"} deploy, or add trigger.dev to devDependencies at that version and run npx trigger.dev deploy.`,
+        fix: `Run the version your packages pin, such as npx trigger.dev@${pinned} deploy, or add trigger.dev to devDependencies at that version and run npx trigger.dev deploy.`,
         docs: `${GUIDE}#deploy-tasks`,
       });
     }

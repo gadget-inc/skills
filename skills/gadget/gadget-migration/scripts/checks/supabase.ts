@@ -383,6 +383,24 @@ function cronFindings(repo: Repo, m: Migrations): Finding[] {
   return findings;
 }
 
+// A Supabase database URL: through Supavisor, or a direct connection to db.<project-ref>.supabase.co.
+// https://<project-ref>.supabase.co alone is the API, which Auth and Storage use with a database elsewhere.
+const DATABASE_URL = /pooler\.supabase\.com|\.supabase\.co:(?:5432|6543)\b|\bdb\.[a-z0-9]+\.supabase\.co\b/;
+
+// Whether the app's database is on Supabase: it has files under supabase/, such as migrations or
+// config.toml, a Supabase database URL in an env file, a deploy config, or source, or a script that runs
+// supabase db or supabase migration. supabase-js alone can mean Auth or Storage, and then the database
+// checks would read migrations meant for another host.
+function usesSupabaseDatabase(repo: Repo): boolean {
+  if (repo.files.some((f) => f.startsWith("supabase/"))) return true;
+  const env = repo.files.filter((f) => /(^|\/)\.env(\.[\w-]+)?$/.test(f));
+  if ([...env, ...urlFiles(repo)].some((f) => DATABASE_URL.test(repo.read(f) ?? ""))) return true;
+  return [...Object.values(repo.scripts()), ...scriptFiles(repo).map((f) => repo.read(f) ?? "")].some((t) => /\bsupabase\s+(db|migration)\s/.test(t));
+}
+
+// CI configs, Makefiles, and shell scripts, where deploy commands live besides package.json.
+const scriptFiles = (repo: Repo) => repo.files.filter((f) => /^\.github\/workflows\/[^/]+\.ya?ml$|(^|\/)\.gitlab-ci\.ya?ml$|(^|\/)(bitbucket-pipelines|cloudbuild)\.ya?ml$|^\.circleci\/config\.ya?ml$|(^|\/)Makefile$|\.sh$/.test(f));
+
 // Text files that hold connection URLs: env examples, deploy configs, and source.
 function urlFiles(repo: Repo): string[] {
   const config = repo.files.filter((f) => ENV_EXAMPLE.test(f) || /(^|\/)(render\.ya?ml|fly\.toml|app\.json|docker-compose\.ya?ml|compose\.ya?ml|vercel\.json|wrangler\.(toml|jsonc?))$/.test(f));
@@ -439,7 +457,7 @@ function cliFindings(repo: Repo): Finding[] {
   const findings: Finding[] = [];
   const candidates = [
     ...Object.entries(repo.scripts()).map(([name, command]) => ({ file: "package.json", text: repo.read("package.json") ?? "", command, name })),
-    ...repo.files.filter((f) => /^\.github\/workflows\/[^/]+\.ya?ml$|(^|\/)\.gitlab-ci\.ya?ml$|(^|\/)(bitbucket-pipelines|cloudbuild)\.ya?ml$|^\.circleci\/config\.ya?ml$|(^|\/)Makefile$|\.sh$/.test(f)).map((f) => ({ file: f, text: repo.read(f) ?? "", command: repo.read(f) ?? "", name: "" })),
+    ...scriptFiles(repo).map((f) => ({ file: f, text: repo.read(f) ?? "", command: repo.read(f) ?? "", name: "" })),
   ];
   const seen = new Set<string>();
   for (const { file, text, command } of candidates) {
@@ -533,6 +551,8 @@ export const supabase: CheckModule = {
     "@supabase/supabase-js" in repo.dependencies() ||
     repo.files.some((f) => ENV_EXAMPLE.test(f) && /\.supabase\.(co|com)\b/.test(repo.read(f) ?? "")),
   run: (repo) => {
+    // Auth and Storage alone: only the checks on Storage and Auth calls apply
+    if (!usesSupabaseDatabase(repo)) return codeFindings(repo);
     const { config, findings } = readConfig(repo);
     const m = migrations(repo);
     const { findings: exposure, tables } = exposureFindings(repo, m, config);

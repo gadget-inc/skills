@@ -89,6 +89,9 @@ describe("Vercel checks on vercel-good", () => {
       ["https://shop-sync-2024.vercel.app", false],
       ["https://my-app-4f9c2a1bc-my-team.vercel.app", true],
       ["https://my-app-git-main-my-team.vercel.app", true],
+      // an alias whose last segment has letters and digits, like a hash without the team slug after it
+      ["https://my-app-studio42.vercel.app", false],
+      ["https://my-git-app.vercel.app", false],
     ];
     for (const [url, flagged] of urls) {
       const dir = tempDir();
@@ -114,6 +117,15 @@ describe("Vercel checks on vercel-good", () => {
   });
 });
 
+describe("vercel/schedule-unprotected with a helper", () => {
+  it("still reports a route whose imported helper only mentions CRON_SECRET in a comment", () => {
+    const dir = tempDir("vercel-good");
+    write(dir, "app/schedules.server.ts", "// TODO: check CRON_SECRET\nexport const scheduleRoute = (job: () => Promise<void>) => async () => { await job(); return new Response(); };\n");
+    const found = vercelFindings(dir).filter((f) => f.id === "vercel/schedule-unprotected");
+    assert.deepEqual(found.map((f) => `${f.severity} ${f.file}:${f.line}`), ["error app/routes/schedules.prune-sessions.tsx:4"]);
+  });
+});
+
 describe("Vercel checks on a Next.js app", () => {
   function nextApp() {
     const dir = tempDir();
@@ -126,6 +138,14 @@ describe("Vercel checks on a Next.js app", () => {
     const dir = nextApp();
     write(dir, "vercel.json", JSON.stringify({ functions: { "app/api/**/*.js": { maxDuration: 800 } } }, null, 2));
     assert.deepEqual(vercelFindings(dir).map(where), ["vercel/functions-no-match vercel.json:3"]);
+  });
+
+  it("accepts a Pages Router cron route, whose default export takes every method", () => {
+    const dir = tempDir();
+    write(dir, "package.json", JSON.stringify({ dependencies: { next: "15.5.0", "@vercel/functions": "2.0.0" } }));
+    write(dir, "vercel.json", JSON.stringify({ crons: [{ path: "/api/cron/prune", schedule: "0 2 * * *" }], functions: { "pages/api/cron/prune.ts": { maxDuration: 300 } } }, null, 2));
+    write(dir, "pages/api/cron/prune.ts", 'import type { NextApiRequest, NextApiResponse } from "next";\nexport default async function handler(req: NextApiRequest, res: NextApiResponse) {\n  if (req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) return res.status(401).end();\n  res.status(200).json({ ok: true });\n}\n');
+    assert.deepEqual(vercelFindings(dir).map(where), ["vercel/schedules-before-cutover vercel.json:2"]);
   });
 
   it("reports a path schedule whose route exports no POST", () => {

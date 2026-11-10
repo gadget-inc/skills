@@ -106,6 +106,39 @@ describe("Google Cloud Run checks", () => {
     );
   });
 
+  it("reads a dispatch deadline from a constant in the same file, and asks for a check by hand when it can't", () => {
+    const deploy = "gcloud run deploy my-app-worker --image=x --no-allow-unauthenticated --timeout=15m\n";
+    const tasks = "const DISPATCH_DEADLINE_SECONDS = 15 * 60;\nawait client.createTask({ parent, task: { dispatchDeadline: { seconds: DISPATCH_DEADLINE_SECONDS } } });\n";
+    withApp({ "scripts/deploy.sh": deploy, "app/tasks.server.ts": tasks }, (dir) => {
+      assert.deepEqual(own(preflight(dir, ["google-cloud-run"]).findings).filter((f) => f.id === "google-cloud-run/timeout-deadline"), []);
+    });
+    const unknown = "await client.createTask({ parent, task: { dispatchDeadline: { seconds: config.deadlineSeconds } } });\n";
+    withApp({ "scripts/deploy.sh": deploy, "app/tasks.server.ts": unknown }, (dir) => {
+      const found = own(preflight(dir, ["google-cloud-run"]).findings).filter((f) => f.id === "google-cloud-run/timeout-deadline");
+      assert.deepEqual(where(found), ["google-cloud-run/timeout-deadline app/tasks.server.ts:1"]);
+      assert.equal(found[0].severity, "manual");
+      assert.match(found[0].message, /config\.deadlineSeconds/);
+    });
+  });
+
+  it("warns, and says to lower --timeout, when the deadline is already Cloud Tasks' 30-minute maximum", () => {
+    const deploy = "gcloud run deploy my-app-worker --image=x --no-allow-unauthenticated --timeout=60m\n";
+    withApp({ "scripts/deploy.sh": deploy, "app/tasks.server.ts": "await client.createTask({ parent, task: { dispatchDeadline: { seconds: 30 * 60 } } });\n" }, (dir) => {
+      const found = own(preflight(dir, ["google-cloud-run"]).findings).filter((f) => f.id === "google-cloud-run/timeout-deadline");
+      assert.deepEqual(where(found), ["google-cloud-run/timeout-deadline scripts/deploy.sh:1"]);
+      assert.equal(found[0].severity, "warning");
+      assert.match(found[0].fix, /--timeout to 30m/);
+    });
+  });
+
+  it("counts a prisma generate after COPY prisma ./prisma, before COPY . .", () => {
+    const dockerfile = 'FROM node:22-alpine\nWORKDIR /app\nCOPY package.json package-lock.json* ./\nCOPY prisma ./prisma\nRUN npm ci --omit=dev && npx prisma generate && npm cache clean --force\nCOPY . .\nRUN npm run build\nCMD ["npm", "run", "start"]\n';
+    const pkg = JSON.stringify({ scripts: { build: "react-router build", start: "react-router-serve ./build/server/index.js" }, dependencies: { "@google-cloud/tasks": "7.3.1", "@prisma/client": "6.19.3", prisma: "6.19.3" } });
+    withApp({ Dockerfile: dockerfile, "package.json": pkg, "prisma/schema.prisma": "" }, (dir) => {
+      assert.deepEqual(own(preflight(dir, ["google-cloud-run"]).findings).filter((f) => f.id === "google-cloud-run/prisma-generate"), []);
+    });
+  });
+
   it("checks every env file a path such as ${ENV}.env.yaml can name, and skips lists it can't read", () => {
     const deploy = 'ENV="${1:?usage}"\nSECRETS="SHOPIFY_API_SECRET=shopify-api-secret:1"\ngcloud run deploy my-app-worker --image=x --env-vars-file="${ENV}.env.yaml" --set-secrets="$SECRETS"\ngcloud run deploy my-app-web --image=x --env-vars-file="${ENV}.env.yaml" --set-secrets="$UNKNOWN"\n';
     withApp(

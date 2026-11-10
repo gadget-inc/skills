@@ -36,7 +36,7 @@ fly config validate --strict -c fly.staging.toml
 | `fly-io/build-arg-unused` | A `[build.args]` entry with no `ARG` in the Dockerfile | |
 | `fly-io/env-fly-prefix` | An `[env]` name starting with `FLY_`, which Fly.io's reference forbids | |
 | `fly-io/web-shutdown` | A Redis connection the web server opens and never closes on `SIGTERM`, with `kill_timeout` over 30 seconds | |
-| `fly-io/ioredis-family` | ioredis before 5.8.2 without `family`, which can't resolve Fly.io's IPv6-only private addresses | |
+| `fly-io/ioredis-family` | ioredis before 5.8.2 without `family` in its options, which can't resolve Fly.io's IPv6-only private addresses. A warning, because a Redis URL that ends with `?family=6` also fixes it and the script can't see the URL | `fly ssh console -C "node -p 'new URL(process.env.REDIS_URL).search'"` prints `?family=6` when the URL sets it |
 | The role the app connects as | `fly-user` owns the tables, so row-level security does nothing for it | `fly ssh console -C "node -p 'new URL(process.env.DATABASE_URL).username'"` prints the user without the password. Then run `scripts/db-check.sql` as that user through `fly mpg proxy <cluster-id>` |
 | Postgres version | `fly mpg create` makes Postgres 16 unless told 17, with no in-place upgrade | `psql "$DIRECT_DATABASE_URL" -c "show server_version"` |
 | Redis eviction | Upstash with eviction on deletes queued jobs | `fly redis status my-app-queue` should show `Eviction` as `Disabled` |
