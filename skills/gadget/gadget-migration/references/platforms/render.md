@@ -17,7 +17,7 @@ node path/to/skills/gadget-migration/scripts/preflight.ts path/to/new-app --plat
 | Check | What it catches | How to check by hand |
 |---|---|---|
 | `render/keyvalue-eviction` | The queue's Key Value without `maxmemoryPolicy: noeviction`. The default, `allkeys-lru`, deletes jobs when memory is full | `render kv get my-app-queue --environment production -o json` shows `"maxmemoryPolicy"`. Fix a live one with `render kv update my-app-queue --memory-policy noeviction` |
-| `render/keyvalue-persistence` | A queue on the free plan or `persistenceMode: off` (memory only), or `snapshot` | The same `render kv get` output shows `"persistenceMode"` |
+| `render/keyvalue-persistence` | A queue with `persistenceMode: off` (memory only) or `snapshot`, or with `plan: free`, whose storage [Render's free instance page](https://render.com/docs/free#free-key-value) describes | The same `render kv get` output shows `"persistenceMode"` |
 | `render/worker-command` | A worker with no `dockerCommand`, which runs the Dockerfile's `CMD` (the template's web server), or one that starts through `npm`, `yarn`, or `pnpm` | |
 | `render/shutdown-delay` | A worker on the default 30 seconds between `SIGTERM` and `SIGKILL`, or a `maxShutdownDelaySeconds` over 300 | Compare the delay with the longest `timeoutMS` in `MIGRATION_INVENTORY.md` |
 | `render/migrate-on-start`, `render/no-migrations` | A `dockerCommand` that migrates on every instance, or nothing that migrates at all | |
@@ -28,9 +28,9 @@ node path/to/skills/gadget-migration/scripts/preflight.ts path/to/new-app --plat
 | `render/open-to-internet` | A database with no `ipAllowList`, or any `0.0.0.0/0` entry | |
 | `render/env-group-secret`, `render/env-group-reference` | `sync: false` in a Blueprint environment group (never set), or a group that references a database or service (fails validation) | |
 | `render/region` | A service that reads a database or service in another region | |
-| `render/free-plan`, `render/disk` | Free plans in production, and a persistent disk used as file storage | |
+| `render/free-plan`, `render/disk` | `plan: free` on a production service or database, whose limits are on [Render's free instance page](https://render.com/docs/free), and a persistent disk used as file storage | |
 | `render/cron-job` | Every cron job: it runs from the moment a sync creates it | Add it in the cutover step only |
-| `render/workflows-start` | `startTask` called outside a rate-limited queue job, so a burst over the plan's limit gets `429` errors nothing retries | Copy the slug from the task's page in the dashboard |
+| `render/workflows-start` | `startTask` called outside a rate-limited queue job, so a burst over the workspace's [start limit](https://render.com/docs/workflows-limits#api-rate-limits) gets `429` errors nothing retries | Copy the slug from the task's page in the dashboard |
 | `render/blueprint-unreadable` | A `render.yaml` the script can't parse | Validate it as `render-blueprints` describes, or against the JSON schema at https://render.com/schema/render.yaml.json, which needs no login |
 
 Three checks need Render itself:
@@ -48,7 +48,7 @@ Three checks need Render itself:
 | ``The table `public.Session` does not exist in the current database.`` on the first request | `dockerCommand: npm run start` replaced the template's `docker-start`, and no `preDeployCommand` runs migrations | `preDeployCommand: npx prisma migrate deploy` on the web service |
 | `prepared statement "s0" already exists` through `connectionPoolString` | Render doesn't publish its PgBouncer version, and its pool string has no query string for `pgbouncer=true` | Add the parameter in code, as in [Connect through the connection pool](https://docs.gadget.dev/guides/moving-to-another-platform/render#connect-through-the-connection-pool) |
 | `job stalled more than allowable limit` after two deploys close together, or after an environment group edit | Each deploy killed a job that outlived the shutdown delay, and a group edit redeploys every linked service with auto-deploy on | Jobs shorter than `maxShutdownDelaySeconds`, or a Workflows task ([Check your host's time limits](https://docs.gadget.dev/guides/moving-to-another-platform/render#check-your-host-s-time-limits)) |
-| `Failed to run task:` from `startTask`, a `ClientError` with `statusCode` `429` | More starts a minute than the workspace plan allows. Render rejects them instead of queuing | Start runs from a rate-limited queue, as in the example below |
+| `Failed to run task:` from `startTask`, a `ClientError` with `statusCode` `429` | More starts a minute than the workspace's limit, which depends on its plan ([API rate limits](https://render.com/docs/workflows-limits#api-rate-limits)). Render rejects them instead of queuing | Start runs from a rate-limited queue, as in the example below |
 | `relation "widget_import" already exists` on a second load | The load script ran through the pool URL, port 6432 | Use the external URL from the database's **Info** page, port 5432 ([Load your records](https://docs.gadget.dev/guides/moving-to-another-platform/render#load-your-records)) |
 
 ## Complete examples
@@ -185,11 +185,11 @@ projects:
             ipAllowList: []
 ```
 
-The Dockerfile needs `RUN npx prisma generate` after `COPY . .`, because `npm run start` skips the template's `docker-start` ([common.md](common.md)). The app's own role is the one the guide's [Set up development and deploys](https://docs.gadget.dev/guides/moving-to-another-platform/render#set-up-development-and-deploys) creates; test it through the pool on staging, because Render doesn't say whether its pool accepts roles you create. Hobby workspaces get 2 environments per project, so this file fits.
+The Dockerfile needs `RUN npx prisma generate` after `COPY . .`, because `npm run start` skips the template's `docker-start` ([common.md](common.md)). The app's own role is the one the guide's [Set up development and deploys](https://docs.gadget.dev/guides/moving-to-another-platform/render#set-up-development-and-deploys) creates; test it through the pool on staging, because Render doesn't say whether its pool accepts roles you create. The file puts 2 environments in one project, and how many a project can have depends on the workspace's plan, on Render's [pricing page](https://render.com/pricing).
 
 ### Start Workflows runs under the start limit
 
-The guide says to start each Render Workflows run from a queued job, because Render rejects starts over its per-minute limit with a `429` instead of queuing them. With BullMQ, for example, the nightly cron job calls `queueReconciliations` with the 300 store ids, and this worker starts the runs at most 40 a minute, under Hobby's 50. BullMQ keeps the limiter in Redis, so it holds across every worker instance, including the old one during a deploy:
+The guide says to start each Render Workflows run from a queued job, because Render rejects starts over its per-minute limit with a `429` instead of queuing them. With BullMQ, for example, the nightly cron job calls `queueReconciliations` with the 300 store ids, and this worker starts the runs at most 40 a minute. Keep `max` below your workspace's start limit, which depends on its plan ([API rate limits](https://render.com/docs/workflows-limits#api-rate-limits)). BullMQ keeps the limiter in Redis, so it holds across every worker instance, including the old one during a deploy:
 
 ```typescript
 // in app/jobs/reconcile-all-shops.server.ts

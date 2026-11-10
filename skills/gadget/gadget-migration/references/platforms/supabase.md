@@ -71,7 +71,7 @@ order by c.relname;
 | `Invalid login credentials` for an imported user with the right password | The hash went in `password`, so it became the password | `password_hash` |
 | `Error creating user` (500) | `password_hash` isn't a bcrypt hash, such as the whole `password` object | `user.password?.hash` |
 | `Target: local stack (127.0.0.1:54322)`, then `connect ECONNREFUSED` | `supabase db push` without `--remote` on CLI 3 | `supabase db push --remote` |
-| `cannot execute INSERT in a read-only transaction` | The disk filled, and Supabase made the database read-only (from Supabase's docs) | Turn the Spend Cap off and raise the disk before the load ([Load your records](https://docs.gadget.dev/guides/moving-to-another-platform/supabase#load-your-records)) |
+| `cannot execute INSERT in a read-only transaction` | The disk filled, and Supabase made the database read-only (from Supabase's docs) | Raise the disk, and check that the Spend Cap lets it grow, before the load ([Load your records](https://docs.gadget.dev/guides/moving-to-another-platform/supabase#load-your-records)) |
 
 ## Complete examples
 
@@ -290,7 +290,7 @@ process.exit(missing.length || unconfirmed.length ? 1 : 0);
 The order in [cutover.md](../cutover.md) and the guide's [cutover section](https://docs.gadget.dev/guides/moving-to-another-platform/supabase#cut-over-to-the-new-platform) holds. On Supabase:
 
 - **Before the day:** `supabase db push --remote` creates the tables, queues, and role, and starts nothing. Run `scripts/set-role-password.ts` in production, deploy the server and workers, and run `scripts/data-api-exposure.sql`, which should print no rows.
-- **Load your custom models:** turn the Spend Cap off, raise the disk, add your address to the network restrictions, and load over the direct URL or the session pooler, never port `6543`. Remove your address afterward.
+- **Load your custom models:** check that the Spend Cap lets the disk grow, raise the disk, add your address to the network restrictions, and load over the direct URL or the session pooler, never port `6543`. Remove your address afterward.
 - **Move scheduled work:** run `supabase/cron/schedule.sql` in production in the same minute you turn off Gadget's scheduler triggers, then check `select jobname, schedule, active from cron.job;`. To roll back, `select cron.unschedule('enqueue-prune-audit-logs');` before Gadget's scheduler runs again, or both apps run the job.
 - **Deploys during the move:** give the worker a drain time above your longest job, 12 minutes for the action that runs that long. Messages stay in pgmq through a deploy, and a killed worker's message is read again within the 60-second timeout.
 

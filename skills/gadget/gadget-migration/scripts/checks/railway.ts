@@ -422,8 +422,8 @@ function sourceFindings(repo: Repo): Finding[] {
       id: "railway/smtp",
       severity: "manual",
       file: "package.json",
-      message: "The app depends on nodemailer, and Railway's Hobby plan blocks outbound SMTP.",
-      fix: "Send through your email provider's HTTP API, or use the Pro plan and redeploy the service after you upgrade.",
+      message: "The app depends on nodemailer, and every send fails if Railway blocks outbound SMTP for the workspace. Railway's outbound networking page (https://docs.railway.com/networking/outbound-networking#email-delivery) says which plans allow it.",
+      fix: "Send through your email provider's HTTP API, or confirm your workspace's plan allows outbound SMTP and redeploy the service after any plan change.",
       docs: `${GUIDE}#email-and-custom-domains`,
     });
   }

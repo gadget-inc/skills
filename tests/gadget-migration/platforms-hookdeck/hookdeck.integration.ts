@@ -324,9 +324,10 @@ describe("scripts/hookdeck.ts against a stand-in API", () => {
     it("keeps rows for the plan's retention plus a day, at least a week, and deletes the rest in batches", async () => {
       const count = async () => Number((await mod.prisma.$queryRawUnsafe("select count(*)::int as n from processed_webhook"))[0].n);
       await assert.rejects(mod.pruneProcessedWebhooks(Number(undefined)), /set HOOKDECK_RETENTION_DAYS/);
-      // Growth: 30 days kept, so nothing goes
+      await assert.rejects(mod.pruneProcessedWebhooks(0), /set HOOKDECK_RETENTION_DAYS/);
+      // 30 days of retention: 31 days kept, so nothing goes
       assert.equal(await mod.pruneProcessedWebhooks(30), 0);
-      // Team: 7 days plus 1, in batches of 10,000
+      // 7 days of retention: 8 days kept, in batches of 10,000
       assert.equal(await mod.pruneProcessedWebhooks(7, 10_000), 25_050);
       assert.equal(await count(), 100);
     });

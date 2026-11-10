@@ -29,7 +29,7 @@ node path/to/skills/gadget-migration/scripts/preflight.ts path/to/new-app --plat
 | `railway/config-apply` | Every `.railway/railway.ts`: an apply deletes resources the file leaves out | `railway config plan --verbose`, then read every destructive line |
 | `railway/config-as-code` | `railway.json` or `railway.toml`, which new services ignore and old ones stop reading on 1 December 2026 | |
 | `railway/bucket-name`, `railway/presign-expiry` | `RAILWAY_BUCKET_NAME` used as the S3 bucket, and `expiresIn` over 7 days | |
-| `railway/smtp` | nodemailer on a plan that may block SMTP | The workspace's plan is Pro |
+| `railway/smtp` | nodemailer, whose mail fails to send if Railway blocks outbound SMTP for the workspace | Railway's [outbound networking page](https://docs.railway.com/networking/outbound-networking#email-delivery) says which plans allow SMTP |
 | `railway/config-unreadable` | A `.railway/railway.ts` with no `service(...)` calls the script can read | |
 
 Run `db-check.sql` through the URL the app uses, as [common.md](common.md) says. On Railway, open a tunnel with `railway connect postgres --tunnel-only` and connect as `app_user` with its own password, because the tunnel prints the template user's URL.
@@ -200,10 +200,10 @@ The order in [cutover.md](../cutover.md) holds. On Railway, per [Cut over to the
 - **Backfill:** add one job per store to your queue so the worker runs it on Railway. `railway run` runs on your computer, which Shopify's allowlist rejects with `403`.
 - **Move scheduled work:** set `SCHEDULED_WORK_MOVED = true`, run `railway config plan`, check it adds only the cron service, and apply.
 - **Before `shopify app deploy`:** the domain shows a green check, the web service passed its health check, and Serverless is off.
-- **Rolling back:** a rollback restores an older image and its variables, within 72 hours on Hobby and 120 on Pro. Migrations stay applied ([Moving back](../cutover.md#moving-back)).
+- **Rolling back:** a rollback restores an older image and its variables, within the image retention your plan gives, on Railway's [plans page](https://docs.railway.com/pricing/plans#image-retention-policy). Migrations stay applied ([Moving back](../cutover.md#moving-back)).
 
 ## What wasn't verified
 
 Run locally: the project file typechecked with TypeScript 5.9.3 against `railway` 3.16.0 and evaluated for production and staging with the package's own functions; the append-only switch, its wrong order, and the way back on `redis:8.2` (8.2.11) with the template's start command and BullMQ 6.7.3; `railwayapp/redis:8.2`, the `redis()` helper's image, under `linux/amd64` emulation (`appendonly yes`, `noeviction`, no `docker-entrypoint.sh`); the bucket client and route against the AWS SDK 3.1165.0, offline; the `P1002` lock through PgBouncer 1.25.2, the version of Railway's pgbouncer image; `ENOTFOUND` for an IPv6-only name in a `node:22-slim` container; and ioredis's default `family` from 5.3.2 to 6.0.0.
 
-Not run, because they need a Railway account: `railway config plan` and `apply` (the IaC engine ships in the CLI and needs a linked project), whether a bucket's variables resolve through `ref(files, "BUCKET")`, the port Railway injects as `PORT` for a domain, whether an apply deletes a PgBouncer service or recovery bucket the file leaves out, and the CLI commands above (their flags come from `railway --help` in CLI 5.71.0). pnpm not passing `SIGTERM` on is the guide's test, not this file's. That new services ignore `railway.json`, the 90-day bucket limit, the `RAILWAY_BUCKET_NAME` warning, Hobby blocking SMTP, and Serverless `502`s come from Railway's docs and the guide's fact-check.
+Not run, because they need a Railway account: `railway config plan` and `apply` (the IaC engine ships in the CLI and needs a linked project), whether a bucket's variables resolve through `ref(files, "BUCKET")`, the port Railway injects as `PORT` for a domain, whether an apply deletes a PgBouncer service or recovery bucket the file leaves out, and the CLI commands above (their flags come from `railway --help` in CLI 5.71.0). pnpm not passing `SIGTERM` on is the guide's test, not this file's. That new services ignore `railway.json`, the 90-day bucket limit, the `RAILWAY_BUCKET_NAME` warning, the SMTP block, and Serverless `502`s come from Railway's docs and the guide's fact-check.

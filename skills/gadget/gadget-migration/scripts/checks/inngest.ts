@@ -497,7 +497,7 @@ function devFlagFindings(repo: Repo): Finding[] {
   return findings;
 }
 
-// A whole webhook payload sent as event data: the Dev Server accepts 3 MiB, the Free plan 256 KiB.
+// A whole webhook payload sent as event data: the Dev Server accepts 3 MiB, and Inngest Cloud's limit depends on the plan.
 function payloadFindings(sent: SentEvent[]): Finding[] {
   const findings: Finding[] = [];
   for (const event of sent) {
@@ -510,7 +510,7 @@ function payloadFindings(sent: SentEvent[]): Finding[] {
       severity: "warning",
       file: event.file,
       line: lineAt(event.text, event.data.index),
-      message: "This sends the whole webhook payload as event data. Inngest's Free plan rejects events over 256 KiB, and the Dev Server accepts up to 3 MiB, so a large order passes locally and fails in production.",
+      message: "This sends the whole webhook payload as event data. The Dev Server accepts events up to 3 MiB, and Inngest Cloud rejects events over your plan's size limit (https://www.inngest.com/docs/durable-execution/limits), so a large order can pass locally and fail in production.",
       error: "Inngest API Error: 400 Event is over the max size",
       fix: "Send the record's id and load the record inside a step.",
       docs: `${GUIDE}#map-api-enqueue-options-to-inngest`,

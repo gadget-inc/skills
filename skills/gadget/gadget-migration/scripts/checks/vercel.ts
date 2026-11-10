@@ -188,8 +188,8 @@ function codeFindings(repo: Repo, config: any): Finding[] {
         message: "Inngest runs every step through this route, which stops at Vercel's default maximum duration of 300 seconds. A step that runs longer, such as an action that ran for 12 minutes on Gadget, fails at 5 minutes on every retry.",
         error: "504 FUNCTION_INVOCATION_TIMEOUT",
         fix: isReactRouter(repo)
-          ? "Add export const config = { maxDuration: 800 } to this route (800 seconds is Pro's maximum)."
-          : "Add export const maxDuration = 800 to this route, or a functions entry for it in vercel.json.",
+          ? "Add export const config = { maxDuration: 800 } to this route, or your plan's maximum if it is lower (https://vercel.com/docs/functions/limitations#max-duration)."
+          : "Add export const maxDuration = 800 to this route, or a functions entry for it in vercel.json, using your plan's maximum if it is lower than 800 (https://vercel.com/docs/functions/limitations#max-duration).",
         docs: `${GUIDE}#check-your-host-s-time-limits`,
       });
     }

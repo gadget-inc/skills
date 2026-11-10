@@ -105,9 +105,11 @@ function blueprintFindings(repo: Repo, doc: any): Finding[] {
         severity: memoryOnly ? "error" : "warning",
         line: lineOfKey(kv, kv.node.plan === "free" ? "plan" : "persistenceMode"),
         message: memoryOnly
-          ? `Key Value ${name(kv)} keeps its data in memory only (${kv.node.plan === "free" ? "plan: free" : "persistenceMode: off"}), so a restart loses every queued job.`
+          ? kv.node.plan === "free"
+            ? `Key Value ${name(kv)} uses plan: free. A queue needs a Key Value that saves every write to disk, or a restart loses the queued jobs, and Render's free instance page (https://render.com/docs/free#free-key-value) says how plan: free stores data.`
+            : `Key Value ${name(kv)} keeps its data in memory only (persistenceMode: off), so a restart loses every queued job.`
           : `Key Value ${name(kv)} saves snapshots only, so a restart loses the jobs added since the last snapshot.`,
-        fix: "Use a paid plan and leave persistenceMode out, which gives journal-snapshot: every write saved to disk once a second.",
+        fix: `${kv.node.plan === "free" ? "Pick a plan that saves data to disk, from Render's pricing page (https://render.com/pricing), and leave" : "Leave"} persistenceMode out, which gives journal-snapshot: every write saved to disk once a second.`,
         docs: `${GUIDE}#create-a-key-value-instance-for-your-queue`,
       });
     }
@@ -324,16 +326,17 @@ function blueprintFindings(repo: Repo, doc: any): Finding[] {
     });
   }
   for (const r of [...services, ...databases].filter((r) => r.node.plan === "free" && isProduction(r) && !(r.node.type === "keyvalue" && queues.includes(r) && queueLibrary))) {
-    const why: Record<string, string> = {
-      web: "stops when idle, so the first webhook after a quiet period waits for it to start, and a preDeployCommand doesn't run on it",
-      keyvalue: "keeps its data in memory only",
+    // what production needs from each kind of instance; Render's free instance page lists what plan: free leaves out
+    const needs: Record<string, string> = {
+      web: "keep running when idle, so the first webhook after a quiet period doesn't wait for it to start, and run its preDeployCommand",
+      keyvalue: "save its data to disk",
     };
     push({
       id: "render/free-plan",
       severity: "warning",
       line: lineOfKey(r, "plan"),
-      message: `${name(r)} is on the free plan, which ${r.kind === "database" ? "expires after 30 days and has no backups" : (why[r.node.type] ?? "isn't meant for production")}.`,
-      fix: "Use a paid plan in production.",
+      message: `${name(r)} uses plan: free in production, where it has to ${r.kind === "database" ? "keep its data for as long as the app runs and have backups" : (needs[r.node.type] ?? "stay up for production traffic")}. Render's free instance page (https://render.com/docs/free) lists the limits of plan: free.`,
+      fix: "Pick a plan that does that from Render's pricing page (https://render.com/pricing).",
       docs: `${GUIDE}#choose-plans`,
     });
   }
@@ -380,9 +383,9 @@ function workflowFindings(repo: Repo): Finding[] {
       severity: "warning",
       file,
       line: lineOf(text, /\.startTask\s*\(/),
-      message: "This starts Render Workflows runs directly. Render rejects starts above its per-minute limit (50 a minute per workspace on Hobby) with a 429 instead of queuing them, and nothing here retries them.",
+      message: "This starts Render Workflows runs directly. Render rejects starts above the workspace's per-minute limit, which depends on its plan (https://render.com/docs/workflows-limits#api-rate-limits), with a 429 instead of queuing them, and nothing here retries them.",
       error: "Failed to run task:",
-      fix: "Start each run from a queued job with retries and a rate limit below your plan's, and copy the task slug from the task's page in the Render Dashboard.",
+      fix: "Start each run from a queued job with retries and a rate limit below your workspace's start limit, and copy the task slug from the task's page in the Render Dashboard.",
       docs: `${GUIDE}#run-long-actions-as-workflows-tasks`,
     });
   }

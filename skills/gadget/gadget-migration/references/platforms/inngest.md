@@ -27,13 +27,13 @@ node path/to/skills/gadget-migration/scripts/preflight.ts path/to/new-app --plat
 | `inngest/account-scope` | `scope: "account"`, which shares the limit with staging. |
 | `inngest/max-runtime` | No `checkpointing.maxRuntime`. The default is 10 seconds in 4.26.2 and unlimited in the docs. |
 | `inngest/dev-flag-in-config` | `INNGEST_DEV` in a Dockerfile, `fly.toml`, `render.yaml`, or other deploy config. |
-| `inngest/large-payload` | A whole webhook payload sent as event data. The Free plan's limit is 256 KiB and the Dev Server's is 3 MiB. |
+| `inngest/large-payload` | A whole webhook payload sent as event data. The Dev Server accepts 3 MiB, and Inngest Cloud's limit depends on your plan ([limits page](https://www.inngest.com/docs/durable-execution/limits)). |
 
 What the script can't see:
 
 - **Every function is registered, and production synced after the deploy.** The Dev Server's `function_count` counts each `createFunction` plus one for each `onFailure`, so 4 functions with 1 failure handler print 5. In production, check the app's function list in the Inngest dashboard, and sync after every deploy that changes a function, as `inngest-cli` describes.
 - **Queues two Gadget actions shared.** The inventory's `api.enqueue` section lists each call's `queue` name. Every function that replaces an action on the same queue name needs the same `scope: "env"` key, as in the complete example below. A plain `key` gives each function its own limit.
-- **The plan's step cap.** On 300 stores, a per-store limit of 2 allows 600 steps at once, above every plan's account cap on the [limits page](https://www.inngest.com/docs/durable-execution/limits). The account cap then decides throughput.
+- **The account's step cap.** On 300 stores, a per-store limit of 2 allows 600 steps at once. Your plan caps concurrent steps for the whole account ([limits page](https://www.inngest.com/docs/durable-execution/limits)), and when that cap is lower, it decides throughput.
 - **Keys per environment.** Staging's host needs the staging environment's `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY`, not production's. Compare `ggt var list` with the host's variable names as [common.md](common.md#checks-to-run) says, and check each key's environment in the dashboard.
 
 ## Failure signatures
@@ -41,7 +41,7 @@ What the script can't see:
 | You see | Cause | Fix |
 |---|---|---|
 | `fetch failed`, with the cause `connect ECONNREFUSED 127.0.0.1:8288` | `INNGEST_DEV=1` with no Dev Server: in production config, or locally before starting `inngest-cli dev` | Remove it from deploy config (`inngest/dev-flag-in-config`), or start the Dev Server |
-| `Inngest API Error: 400 Event is over the max size: Max 3145728 bytes / Size 4194361 bytes` | The Dev Server's 3 MiB event limit. The Free plan's is 256 KiB | Send ids, and load records in a step |
+| `Inngest API Error: 400 Event is over the max size: Max 3145728 bytes / Size 4194361 bytes` | The Dev Server's 3 MiB event limit. Inngest Cloud's depends on your plan ([limits page](https://www.inngest.com/docs/durable-execution/limits)) | Send ids, and load records in a step |
 | An event sent with `{ shopId: 123n, nested: { orderId: 5n }, list: [1n, 2] }` arrives as `{"list":[null,2],"nested":{}}` | `inngest.send` drops `bigint` fields at any depth and turns one in an array into `null` | Convert to strings first, as `toEventData` below does |
 | A job runs, but every store waits behind the busiest one | The event lacks the field the concurrency key reads, so it lands in the keyless limit | `inngest/key-field-missing`. Put `shopId` in every event |
 | `StepError [NonRetriableError]: order 1 no longer exists`, the run `FAILED` after one attempt | `NonRetriableError` thrown in a step: no retries, then `onFailure` runs once | Expected. Throw it only for errors a retry can't fix |
@@ -168,7 +168,8 @@ export interface EnqueueOptions {
   startAt?: Date;
 }
 
-// 256 KiB on the Free plan and 3 MiB on paid plans. The Dev Server accepts 3 MiB, so it can't catch this.
+// set INNGEST_MAX_EVENT_BYTES to your plan's event size limit, from https://www.inngest.com/docs/durable-execution/limits
+// the Dev Server accepts 3 MiB, so it can't catch an event over a smaller limit
 const MAX_EVENT_BYTES = Number(process.env.INNGEST_MAX_EVENT_BYTES ?? 256 * 1024);
 
 // inngest.send drops bigint fields without an error, so convert them, nested ones too

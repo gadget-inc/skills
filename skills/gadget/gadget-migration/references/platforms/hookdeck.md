@@ -35,9 +35,9 @@ What the script can't see:
 - **The connections as Hookdeck has them.** `HOOKDECK_API_KEY=... node scripts/hookdeck.ts audit` reports a source that isn't `SHOPIFY`, a missing retry or deduplicate rule, a window in seconds, a transform rule, a destination path, path forwarding left on toward Gadget, auth other than Hookdeck's signature, and a paused connection.
 - **Webhooks Hookdeck rejected.** After the first real webhook, `hookdeck gateway request list --rejection-cause VERIFICATION_FAILED --output json` should list nothing.
 - **A store's webhooks still on their way to Gadget.** `node scripts/hookdeck.ts pending store-a.myshopify.com` lists the store's events on the Gadget connections that are queued, waiting for a retry, held, or failed.
-- **Throughput.** Every plan delivers 5 events per second per destination unless you raise it. The project's [Quotas](https://dashboard.hookdeck.com/settings/project/quotas) page shows yours, and a delivery policy above it has no effect.
+- **Throughput.** Hookdeck delivers to each destination no faster than the project's throughput limit. The project's [Quotas](https://dashboard.hookdeck.com/settings/project/quotas) page shows it, and a delivery policy above it has no effect.
 - **The header prefix.** A custom prefix in the project settings renames `x-hookdeck-signature`, and the route's check then rejects every delivery. Keep the default.
-- **Cleanup against retention.** `select min(received_at), count(*) from processed_webhook;` should show nothing older than the cleanup's window, and that window must be longer than the plan's retention: 3 days on Developer, 7 on Team, 30 on Growth.
+- **Cleanup against retention.** `select min(received_at), count(*) from processed_webhook;` should show nothing older than the cleanup's window, and that window must be longer than the retention your plan gives, on Hookdeck's [pricing page](https://hookdeck.com/pricing).
 
 ## Failure signatures
 
@@ -234,8 +234,8 @@ Before a store's first filter write, the Gadget connections need the same retry 
 import prisma from "../db.server";
 
 export async function pruneProcessedWebhooks(retentionDays = Number(process.env.HOOKDECK_RETENTION_DAYS), batchSize = 10_000) {
-  // 3 days on Developer, 7 on Team, 30 on Growth
-  if (!Number.isInteger(retentionDays) || retentionDays < 3) throw new Error("set HOOKDECK_RETENTION_DAYS to your Hookdeck plan's retention in days");
+  // your plan's event retention, from https://hookdeck.com/pricing
+  if (!Number.isInteger(retentionDays) || retentionDays < 1) throw new Error("set HOOKDECK_RETENTION_DAYS to your Hookdeck plan's retention in days, from https://hookdeck.com/pricing");
   // shopify-webhooks.md keeps a week; keep whichever is longer, plus a day
   const keepDays = Math.max(retentionDays, 7) + 1;
   let deleted = 0;

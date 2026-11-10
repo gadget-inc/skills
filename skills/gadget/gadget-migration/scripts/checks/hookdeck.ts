@@ -322,7 +322,7 @@ function processedWebhookFindings(repo: Repo): Finding[] {
       file: table,
       line: lineOf(repo.read(table) ?? "", /processed_webhook|webhook_?id/i),
       message: "Nothing deletes old processed_webhook rows, so the table grows by one row per webhook forever.",
-      fix: "Delete rows older than your Hookdeck plan's retention plus a day, in batches, on a daily schedule, as the cleanup job in references/platforms/hookdeck.md does.",
+      fix: "Delete rows older than your Hookdeck plan's retention (https://hookdeck.com/pricing) plus a day, in batches, on a daily schedule, as the cleanup job in references/platforms/hookdeck.md does.",
       docs: `${GUIDE}#process-webhooks-before-responding`,
     },
   ];

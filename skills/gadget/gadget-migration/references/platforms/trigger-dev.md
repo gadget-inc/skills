@@ -37,7 +37,7 @@ What the script can't see:
 
 - **Variables set on Trigger.dev.** `scripts/check-trigger-env.ts` below lists the names your tasks need that the project's production environment lacks.
 - **The environment's concurrency limit.** On 300 stores, `perKey: 2` allows 600 runs, and the **Concurrency** page in the dashboard shows the environment's cap, which applies first. Each running task holds its own database pool, so size the pool for that cap: a cap of 200 runs with a pool of 1 needs 200 connections.
-- **Static IPs.** A database that accepts only the host's network rejects tasks, which connect from Trigger.dev's machines. The addresses are on the dashboard's **Regions** page, on paid plans.
+- **Static IPs.** A database that accepts only the host's network rejects tasks, which connect from Trigger.dev's machines. The addresses are on the dashboard's **Regions** page, if your plan has static IPs ([pricing page](https://trigger.dev/pricing)).
 - **Each host's key.** A key belongs to one environment, and a run triggered with it goes there: with no deployment in that environment, it stays `QUEUED`. Check `TRIGGER_SECRET_KEY` starts with `tr_prod_` on production and `tr_stg_` on staging.
 
 ## Failure signatures
@@ -233,7 +233,7 @@ if (process.argv[1]?.endsWith("attach-schedules.ts")) {
 }
 ```
 
-`window: "0m"` needs a paid plan. `check-trigger-env.ts` lists the variables your tasks read, from preflight's `trigger-dev/env-vars` finding, that an environment doesn't have:
+Whether a schedule can use `window: "0m"` depends on your plan ([pricing page](https://trigger.dev/pricing)). `check-trigger-env.ts` lists the variables your tasks read, from preflight's `trigger-dev/env-vars` finding, that an environment doesn't have:
 
 ```typescript
 // in scripts/check-trigger-env.ts

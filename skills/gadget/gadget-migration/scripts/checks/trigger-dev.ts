@@ -235,7 +235,7 @@ function taskFindings(tasks: TaskDef[]): Finding[] {
           file: t.file,
           line: lineAt(t.text, cron.index),
           message: "This schedule has no window, so Trigger.dev gives it a 60-minute one: each run starts at some point in the hour after its cron time. Gadget started a scheduled action within 10 seconds.",
-          fix: 'Use cron: { pattern: "0 2 * * *", window: "0m" }, which needs a paid plan.',
+          fix: 'Use cron: { pattern: "0 2 * * *", window: "0m" } if your plan allows it (https://trigger.dev/pricing), or the smallest window it allows.',
           docs: `${GUIDE}#replace-scheduled-actions`,
         });
       }
