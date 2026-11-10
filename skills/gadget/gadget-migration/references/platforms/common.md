@@ -59,8 +59,11 @@ Three checks need the host itself:
 | `TypeError: Invalid URL` | A host-only variable, such as `VERCEL_URL` or `RAILWAY_PUBLIC_DOMAIN`, used as a URL | Add `https://`, or use your own `SHOPIFY_APP_URL` |
 | `type "datetime" does not exist` during `prisma migrate deploy` | Shopify's template ships a SQLite migration (`"expires" DATETIME`) | Delete `prisma/migrations`, run `prisma migrate dev --name init` against a local Postgres, commit ([Install and authenticate merchants](https://docs.gadget.dev/guides/moving-to-another-platform#install-and-authenticate-merchants)) |
 | `@prisma/client did not initialize yet` | The image starts with `npm run start` instead of the template's `docker-start`, so nothing runs `prisma generate` after the schema is copied in | `RUN npx prisma generate` after `COPY . .` in the Dockerfile |
-| `prepared statement "s0" already exists` | A pooler in transaction mode that doesn't keep prepared statements | Add `pgbouncer=true` to a Prisma URL, or turn prepared statements off in your client. See [Prepared statements through a pooler](#prepared-statements-through-a-pooler) |
-| `relation "widget_import" does not exist`, or `already exists` on a second run | The load script ran through a pooler in transaction mode | Load over the direct URL ([Load your records](https://docs.gadget.dev/guides/moving-to-another-platform#load-your-records)) |
+| `prepared statement "s0" already exists`, or `prepared statement "s15" does not exist` | A pooler in transaction mode that doesn't keep prepared statements | Add `pgbouncer=true` to a Prisma URL, or turn prepared statements off in your client. See [Prepared statements through a pooler](#prepared-statements-through-a-pooler) |
+| `relation "widget_import" already exists` on the second run of the load script | The first run went through a pooler in transaction mode, which kept its temporary table on a server connection | Load over the direct URL ([Load your records](https://docs.gadget.dev/guides/moving-to-another-platform#load-your-records)), or use [the one-transaction script](#load-records-through-any-pooler) |
+| `relation "widget_import" does not exist` | The one-transaction load script ran without `psql -1`, or the plain script's statements landed on different connections in a pooler | Run it with `psql -1` |
+| `Error: P3009` and `migrate found failed migrations in the target database`, naming `20240530213853_create_session_table` | The first deploy ran the template's SQLite migration and Prisma recorded it as failed, so the fixed migrations won't apply | `npx prisma migrate resolve --rolled-back 20240530213853_create_session_table` against that database, then deploy again |
+| `Error: P3019` and `does not match the one specified in the migration_lock.toml` | `prisma/migrations/migration_lock.toml` still says `sqlite` | Delete `prisma/migrations` and start a Postgres migration history with `prisma migrate dev --name init` |
 | `remaining connection slots are reserved for roles with the SUPERUSER attribute`, or `sorry, too many clients already` | Instances times pool size is over the limit | Smaller pools, a cap on instances, or the host's pooler |
 | `unrecognized configuration parameter "app.shop_id"` | A query ran without the store set, as a role the policy applies to | Expected: set the store in the transaction. Seeing rows instead means the role skips row-level security |
 | `IMPORTANT! Eviction policy is allkeys-lru. It should be "noeviction"` in the BullMQ log | Redis deletes keys when full, and queued jobs vanish without an error | Set `maxmemory-policy noeviction` |
@@ -166,6 +169,9 @@ The main guide's load script needs one connection for its whole run. When the on
 ```sql
 -- in scripts/load-widgets-pooled.sql
 -- run with: psql -1 "$DATABASE_URL" -f scripts/load-widgets-pooled.sql
+-- -1 runs the file as one transaction. Without it, the table is dropped as soon as it's created.
+-- a run of the plain script through the pooler can leave its table on the server connection
+drop table if exists pg_temp.widget_import;
 create temp table widget_import (record jsonb) on commit drop;
 
 \copy widget_import (record) from 'widget.ndjson' with (format csv, quote e'\x01', delimiter e'\x02')
@@ -199,12 +205,14 @@ const prisma = new PrismaClient();
 const results = await Promise.allSettled(Array.from({ length: 200 }, (_, i) => prisma.$queryRaw`select ${i}::int as n`));
 const failures = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
 console.log(`${results.length - failures.length} of ${results.length} queries succeeded`);
-for (const message of new Set(failures.map((f) => String(f.reason?.message ?? f.reason).split("\n").pop()))) console.log(message);
+// each failure names its own statement, such as "s15", so print each kind of error once
+const messages = failures.map((f) => String(f.reason?.message ?? f.reason).split("\n").pop()!.replace(/"s\d+"/, '"s<n>"'));
+for (const message of new Set(messages)) console.log(message);
 await prisma.$disconnect();
 process.exit(failures.length ? 1 : 0);
 ```
 
-With Prisma, a failure means adding `pgbouncer=true` to the URL, which turns prepared statements off.
+Through PgBouncer 1.25.2 in transaction mode, it passed 200 of 200 with `max_prepared_statements = 100`, and failed between 110 and 180 of 200 across runs with it set to 0, with `prepared statement "s15" does not exist` and the like. With Prisma, a failure means adding `pgbouncer=true` to the URL, which turns prepared statements off: the same pooler then passed 200 of 200.
 
 ## Cutover
 
@@ -216,4 +224,14 @@ The order in [cutover.md](../cutover.md) holds on every host. Three steps go wro
 
 ## What wasn't verified
 
-Run against Postgres 18.6, PgBouncer 1.25.2 in transaction mode, Valkey 8, and Shopify's React Router template as of October 2026: `db-check.sql`, the URL helper, the worker and its shutdown, the esbuild worker build, the pooled load script, and the pooler check. The Cloudflare Hyperdrive, Supavisor, Neon, and Cloud SQL poolers weren't tested here; their platform files say what was.
+Run on Postgres 18.6, PgBouncer 1.25.2 in transaction mode, Valkey 8, Prisma 6.19.3, BullMQ 6.7.3, and Shopify's React Router template as of October 2026:
+
+- `db-check.sql`, as a superuser, as a role without a policy, through PgBouncer, and with pgvector moved to an `extensions` schema.
+- The one-transaction load script, twice through PgBouncer, and its `does not exist` failure without `-1`. The plain script's second run failed with `already exists` on the same pooler.
+- The pooler check against PgBouncer with and without prepared statements, and with `pgbouncer=true`.
+- The three Prisma errors: `type "datetime" does not exist`, then `P3009` until `prisma migrate resolve`, and `P3019`.
+- The worker, built with the `build:worker` script into the template's Docker image: a running job finished and the container exited 0 two seconds after `SIGTERM`. The template's web server with the `entry.server.tsx` handler exited 6 seconds after `SIGTERM`, the keep-alive time of the last request, and without it Docker killed it at its 30-second stop timeout.
+
+With Redis unreachable, `worker.close()` waits for a connection that never comes, and the host kills the worker at the end of its drain time. Nothing in this file prevents that.
+
+The Hyperdrive, Supavisor, Neon, and Cloud SQL poolers weren't tested here. Their platform files say what was.
