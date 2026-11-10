@@ -99,7 +99,8 @@ let after: string | null = null;
 do {
   const response = await admin.graphql(RECONCILE_ORDERS, { variables: { query: `updated_at:>='${since}'`, after } });
   const { data } = await response.json();
-  // the same function the webhook job calls, so a missed webhook still sends its email or queues its job
+  // the same handler the webhook job calls, built as in "Do work only when a field you care about changed" in shopify-webhooks.md:
+  // a missed webhook still sends its email, and an order the webhooks already wrote does nothing
   for (const order of data.orders.nodes) await handleOrderUpdated(shopId, order, { source: "reconciliation" });
   after = data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null;
 } while (after);
