@@ -82,7 +82,7 @@ What Hookdeck doesn't change:
 
 For a store-by-store cutover, filters on `x-shopify-shop-domain` can route each store's webhooks to Gadget or to the new app, which replaces the webhook half of a forwarding layer. A filter change only applies to webhooks received after it, so wait for a store's queued deliveries to Gadget to finish before moving its tokens. The guide has the order.
 
-Limits that matter at Shopify volume, from Hookdeck's pricing and limits pages on 9 November 2026: the free Developer plan has 10,000 events a month, which an app on 300 stores uses up in hours. The Team plan starts at $39 a month, plus $3.00 per 100,000 events up to 5 million. Every plan includes 5 events per second per destination, and deliveries above that queue: 20,000 `products/update` webhooks from one bulk edit take about 67 minutes. Events are kept 3 days on Developer, 7 on Team, and 30 on Growth, and you can only retry or replay within that window.
+Limits that matter at Shopify volume, from Hookdeck's pricing and limits pages on 9 November 2026: every plan includes 5 events per second per destination, and deliveries above that queue: 20,000 `products/update` webhooks from one bulk edit take about 67 minutes. Events are kept 3 days on Developer, 7 on Team, and 30 on Growth, and you can only retry or replay within that window. Don't estimate Hookdeck costs for the user; point them to https://hookdeck.com/pricing.
 
 ## Drop duplicate deliveries
 
