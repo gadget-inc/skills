@@ -23,7 +23,7 @@ node path/to/skills/gadget-migration/scripts/preflight.ts path/to/new-app --plat
 | `render/migrate-on-start`, `render/no-migrations` | A `dockerCommand` that migrates on every instance, or nothing that migrates at all | |
 | `render/prisma-generate` | A `dockerCommand` that skips the template's `docker-start`, with no `prisma generate` in the Dockerfile | |
 | `render/migrations-through-pool` | Prisma's `directUrl` variable, or the variable a migrating service uses, set from `connectionPoolString` | `render psql my-app-db -c "select pid from pg_locks where locktype = 'advisory' and objid = 72707369"` lists a stuck lock |
-| `render/owner-skips-rls` | A table with row-level security that isn't forced, while the app connects with a `fromDatabase` URL, as the user that owns the tables. The guide's [Set up development and deploys](https://docs.gadget.dev/guides/moving-to-another-platform/render#set-up-development-and-deploys) gives the separate role | `psql "$DATABASE_URL" -f path/to/skills/gadget-migration/scripts/db-check.sql` |
+| `render/owner-skips-rls` | A table with row-level security that isn't forced, while the app connects with a `fromDatabase` URL, as the user that owns the tables. The guide's [Rewrite permissions and shop tenancy](https://docs.gadget.dev/guides/moving-to-another-platform/render#rewrite-permissions-and-shop-tenancy) gives the separate role | `psql "$DATABASE_URL" -f path/to/skills/gadget-migration/scripts/db-check.sql` |
 | `render/health-check`, `render/single-instance` | A web service with no `healthCheckPath`, or one instance in production | `curl -sS -o /dev/null -w '%{http_code}\n' https://app.example.com/healthz` prints `200` |
 | `render/open-to-internet` | A database with no `ipAllowList`, or any `0.0.0.0/0` entry | |
 | `render/env-group-secret`, `render/env-group-reference` | `sync: false` in a Blueprint environment group (never set), or a group that references a database or service (fails validation) | |
@@ -185,7 +185,7 @@ projects:
             ipAllowList: []
 ```
 
-The Dockerfile needs `RUN npx prisma generate` after `COPY . .`, because `npm run start` skips the template's `docker-start` ([common.md](common.md)). The app's own role is the one the guide's [Set up development and deploys](https://docs.gadget.dev/guides/moving-to-another-platform/render#set-up-development-and-deploys) creates; test it through the pool on staging, because Render doesn't say whether its pool accepts roles you create. The file puts 2 environments in one project, and how many a project can have depends on the workspace's plan, on Render's [pricing page](https://render.com/pricing).
+The Dockerfile needs `RUN npx prisma generate` after `COPY . .`, because `npm run start` skips the template's `docker-start` ([common.md](common.md)). The app's own role is the one the guide's [Rewrite permissions and shop tenancy](https://docs.gadget.dev/guides/moving-to-another-platform/render#rewrite-permissions-and-shop-tenancy) creates; test it through the pool on staging, because Render doesn't say whether its pool accepts roles you create. The file puts 2 environments in one project, and how many a project can have depends on the workspace's plan, on Render's [pricing page](https://render.com/pricing).
 
 ### Start Workflows runs under the start limit
 

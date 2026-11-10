@@ -230,7 +230,7 @@ function codeFindings(repo: Repo, config: any): Finding[] {
         message: "This parses file uploads sent to the server. A Vercel Function accepts request bodies up to 4.5MB, where Gadget accepted 100MB, so a 20MB upload that worked on Gadget fails.",
         error: "413 FUNCTION_PAYLOAD_TOO_LARGE",
         fix: "Upload from the browser straight to storage, with Blob's client uploads or a presigned S3 URL, and save the object's key on the record.",
-        docs: `${GUIDE}#file-storage`,
+        docs: `${GUIDE}#search-files-and-other-services`,
       });
     }
   }

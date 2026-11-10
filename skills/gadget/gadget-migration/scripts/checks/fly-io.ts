@@ -187,7 +187,7 @@ function configFindings(repo: Repo, { file, text, config }: FlyConfig, handlers:
       line: keyLine(processes, group),
       message: `The ${group} group starts with "${command}", which runs migrations every time one of its Machines starts${config.deploy?.release_command ? ", on top of release_command" : ""}. A webhook that wakes a Machine waits for them.`,
       fix: 'Start it with npm run start, and run migrations once per deploy with release_command = "npx prisma migrate deploy" under [deploy].',
-      docs: `${GUIDE}#set-up-development-and-deploys`,
+      docs: `${GUIDE}#run-migrations-once-per-deploy`,
     });
   }
   const hasMigrations = repo.files.some((f) => /(^|\/)prisma\/migrations\/[^/]+\/migration\.sql$/.test(f));
@@ -202,13 +202,13 @@ function configFindings(repo: Repo, { file, text, config }: FlyConfig, handlers:
       message: "The app has Prisma migrations, and nothing in this config runs them: there's no release_command, and no process runs prisma migrate deploy.",
       error: "The table `public.Session` does not exist in the current database.",
       fix: 'Add release_command = "npx prisma migrate deploy" under [deploy], with the direct database URL available to it.',
-      docs: `${GUIDE}#set-up-development-and-deploys`,
+      docs: `${GUIDE}#run-migrations-once-per-deploy`,
     });
   }
 
   // [processes] commands replace the Dockerfile's CMD, which ran prisma generate in the template
   for (const [group, command] of dockerfile ? Object.entries(processes) : []) {
-    const found = startOverrideFindings(repo, "fly-io", file, keyLine(processes, group), String(command), `${GUIDE}#set-up-development-and-deploys`, dockerfile!);
+    const found = startOverrideFindings(repo, "fly-io", file, keyLine(processes, group), String(command), `${GUIDE}#run-migrations-once-per-deploy`, dockerfile!);
     if (found.length) {
       findings.push(found[0]);
       break;
@@ -298,7 +298,7 @@ function cronFindings(repo: Repo, configs: FlyConfig[]): Finding[] {
         line: first.line,
         message: `"${first.command}" runs Supercronic, and ${path} never installs it, so the cron Machine can't start its command.`,
         fix: `Download Supercronic in ${path} with its checksum, as in the Dockerfile in references/platforms/fly-io.md.`,
-        docs: `${GUIDE}#set-up-development-and-deploys`,
+        docs: `${GUIDE}#run-migrations-once-per-deploy`,
       });
     }
 

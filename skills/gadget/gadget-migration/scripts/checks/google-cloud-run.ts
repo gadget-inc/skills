@@ -235,7 +235,7 @@ function shopifyEnvFindings(repo: Repo, commands: Gcloud[], findings: Finding[])
       message: `This deploys ${serviceName(c)} without ${missing.join(", ")}${path ? ` (not in ${path} or its secrets)` : ""}. ${server} reads them when it loads, and every service built from the image loads it, so no revision of ${serviceName(c)} starts.`,
       error: missing.includes("SHOPIFY_APP_URL") ? "Detected an empty appUrl configuration" : `Missing values for: ${missing.map((n) => (n === "SHOPIFY_API_KEY" ? "apiKey" : "apiSecretKey")).join(", ")}`,
       fix: `Add ${missing.join(", ")} to this service's env vars file or secrets, the same as the web service's.`,
-      docs: `${GUIDE}#set-up-development-and-deploys`,
+      docs: `${GUIDE}#run-migrations-once-per-deploy`,
     });
   }
 }
@@ -534,7 +534,7 @@ function migrateJobFindings(repo: Repo, commands: Gcloud[], findings: Finding[])
     // --wait implies --execute-now on jobs deploy
     const runs = list.find((c) => (isCmd(c, "run", "jobs", "deploy") && has(c, "execute-now", "wait")) || (isCmd(c, "run", "jobs", "execute") && serviceName(c) === name));
     const text = repo.read(file) ?? "";
-    const base = { id: "google-cloud-run/migrate-before-deploy", file, docs: `${GUIDE}#set-up-development-and-deploys` } as const;
+    const base = { id: "google-cloud-run/migrate-before-deploy", file, docs: `${GUIDE}#run-migrations-once-per-deploy` } as const;
     if (!runs) {
       findings.push({ ...base, severity: "error", line: migrate.line, message: `This deploys the job ${name} but never runs it, so the services deploy without their migrations.`, fix: "Add --execute-now --wait to the jobs deploy command, or run gcloud run jobs execute with --wait before the services deploy." });
     } else if (!has(runs, "wait")) {

@@ -181,7 +181,7 @@ function blueprintFindings(repo: Repo, doc: any): Finding[] {
       line: lineOfKey(service, start.key),
       message: `${name(service)} runs migrations when it starts, so every instance runs them, and a start that takes over 15 minutes fails the deploy.`,
       fix: "Start the server without migrations, such as dockerCommand: npm run start, and add preDeployCommand: npx prisma migrate deploy to the web service.",
-      docs: `${GUIDE}#set-up-development-and-deploys`,
+      docs: `${GUIDE}#run-migrations-once-per-deploy`,
     });
   }
   const web = services.find((r) => r.node.type === "web");
@@ -193,13 +193,13 @@ function blueprintFindings(repo: Repo, doc: any): Finding[] {
       message: "Nothing in render.yaml runs prisma migrate deploy: no preDeployCommand, and no start command that migrates.",
       error: "The table `public.Session` does not exist in the current database.",
       fix: "Add preDeployCommand: npx prisma migrate deploy to the web service, unless your deploy pipeline runs migrations before Render deploys.",
-      docs: `${GUIDE}#set-up-development-and-deploys`,
+      docs: `${GUIDE}#run-migrations-once-per-deploy`,
     });
   }
   const overridden = services.find((r) => r.node.runtime === "docker" && typeof r.node.dockerCommand === "string" && r.node.type !== "worker") ??
     services.find((r) => r.node.runtime === "docker" && typeof r.node.dockerCommand === "string");
   if (overridden) {
-    findings.push(...startOverrideFindings(repo, "render", FILE, lineOfKey(overridden, "dockerCommand"), overridden.node.dockerCommand, `${GUIDE}#set-up-development-and-deploys`, dockerfileOf(repo, overridden)));
+    findings.push(...startOverrideFindings(repo, "render", FILE, lineOfKey(overridden, "dockerCommand"), overridden.node.dockerCommand, `${GUIDE}#run-migrations-once-per-deploy`, dockerfileOf(repo, overridden)));
   }
 
   // the web service and webhooks
@@ -281,7 +281,7 @@ function blueprintFindings(repo: Repo, doc: any): Finding[] {
           line: lineAt(sql, match.index!),
           message: `${table(match[1])} has row-level security, and the app's ${appVar} comes from fromDatabase, which connects as the database's own user. That user runs the migrations, so it owns the table and skips its policies: a query with no store set returns every store's rows.`,
           fix: `Connect the web service and worker as a role you create with create user, with grants and alter default privileges, and put its URL in a dashboard environment group. Keep DIRECT_DATABASE_URL on the default user for migrations. Forcing row-level security on ${table(match[1])} instead also applies the policies to the default user, but then data migrations and the load script fail with unrecognized configuration parameter "app.shop_id".`,
-          docs: `${GUIDE}#set-up-development-and-deploys`,
+          docs: `${GUIDE}#rewrite-permissions-and-shop-tenancy`,
         });
       }
     }
@@ -337,7 +337,7 @@ function blueprintFindings(repo: Repo, doc: any): Finding[] {
       line: lineOfKey(r, "plan"),
       message: `${name(r)} uses plan: free in production, where it has to ${r.kind === "database" ? "keep its data for as long as the app runs and have backups" : (needs[r.node.type] ?? "stay up for production traffic")}. Render's free instance page (https://render.com/docs/free) lists the limits of plan: free.`,
       fix: "Pick a plan that does that from Render's pricing page (https://render.com/pricing).",
-      docs: `${GUIDE}#choose-plans`,
+      docs: `${GUIDE}#choose-where-your-app-will-run`,
     });
   }
   const regions = new Map<string, string>();
