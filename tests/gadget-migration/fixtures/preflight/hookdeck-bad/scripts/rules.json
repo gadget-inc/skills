@@ -1,0 +1,6 @@
+[
+  { "type": "retry", "strategy": "exponential", "interval": 60000, "count": 10 },
+  { "type": "deduplicate", "window": 3600, "include_fields": ["headers.x-shopify-webhook-id"] },
+  { "type": "transform", "transformation": { "name": "shopify-tidy", "code": "addHandler('transform', (request) => request)" } },
+  { "type": "filter", "headers": { "x-shopify-shop-domain": { "$in": "store-a.myshopify.com" } } }
+]

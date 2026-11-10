@@ -1,0 +1,9 @@
+{
+  "name": "my-app",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "@shopify/shopify-app-react-router": "4.0.2"
+  }
+}

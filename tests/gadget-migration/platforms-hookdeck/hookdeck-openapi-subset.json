@@ -1,0 +1,1161 @@
+{
+ "source": "https://api.hookdeck.com/2026-09-01/openapi",
+ "fetched": "2026-11-10",
+ "note": "the request bodies of PUT /connections/{id} and PUT /destinations/{id}, and the component schemas they reference, without descriptions",
+ "roots": {
+  "updateConnectionBody": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "pattern": "^[A-z0-9-_]+$",
+     "maxLength": 155,
+     "nullable": true
+    },
+    "rules": {
+     "type": "array",
+     "items": {
+      "$ref": "#/components/schemas/Rule"
+     }
+    }
+   },
+   "additionalProperties": false
+  },
+  "updateDestinationBody": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "pattern": "^[A-z0-9-_]+$",
+     "maxLength": 155
+    },
+    "type": {
+     "type": "string",
+     "enum": [
+      "HTTP",
+      "CLI",
+      "MOCK_API",
+      "SQS"
+     ]
+    },
+    "config": {
+     "$ref": "#/components/schemas/VerificationConfig"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ "components": {
+  "schemas": {
+   "DeduplicateRule": {
+    "type": "object",
+    "properties": {
+     "type": {
+      "type": "string",
+      "enum": [
+       "deduplicate"
+      ]
+     },
+     "window": {
+      "type": "integer",
+      "minimum": 1000,
+      "maximum": 3600000
+     },
+     "include_fields": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "exclude_fields": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     }
+    },
+    "required": [
+     "type",
+     "window"
+    ],
+    "additionalProperties": false
+   },
+   "DelayRule": {
+    "type": "object",
+    "properties": {
+     "type": {
+      "type": "string",
+      "enum": [
+       "delay"
+      ]
+     },
+     "delay": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "type",
+     "delay"
+    ],
+    "additionalProperties": false
+   },
+   "DeliveryGroupRateLimitPeriod": {
+    "type": "string",
+    "enum": [
+     "second",
+     "minute",
+     "hour"
+    ]
+   },
+   "DeliveryPolicyGroupOverride": {
+    "type": "object",
+    "properties": {
+     "rate": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000
+     },
+     "rate_period": {
+      "$ref": "#/components/schemas/DeliveryGroupRateLimitPeriod"
+     }
+    },
+    "required": [
+     "rate",
+     "rate_period"
+    ],
+    "additionalProperties": false
+   },
+   "DestinationConfigCLIAuth": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false,
+    "oneOf": [
+     {
+      "$ref": "#/components/schemas/DestinationConfigCLIAuthHookdeckSignatureDefault"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigCLIAuthCustomSHA256HMACSignature"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigCLIAuthBasicAuth"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigCLIAuthAPIKey"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigCLIAuthBearerToken"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigCLIAuthOAuth2ClientCredentials"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigCLIAuthOAuth2AuthorizationCode"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigCLIAuthAWSSignature"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigCLIAuthGCPServiceAccount"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigCLIAuthStandardWebhooks"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigCLIAuthEmpty"
+     }
+    ]
+   },
+   "DestinationConfigCLIAuthAPIKey": {
+    "type": "object",
+    "properties": {
+     "key": {
+      "type": "string"
+     },
+     "api_key": {
+      "type": "string"
+     },
+     "to": {
+      "type": "string",
+      "enum": [
+       "header",
+       "query"
+      ]
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigCLIAuthAWSSignature": {
+    "type": "object",
+    "properties": {
+     "access_key_id": {
+      "type": "string"
+     },
+     "secret_access_key": {
+      "type": "string"
+     },
+     "region": {
+      "type": "string"
+     },
+     "service": {
+      "type": "string"
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigCLIAuthBasicAuth": {
+    "type": "object",
+    "properties": {
+     "username": {
+      "type": "string"
+     },
+     "password": {
+      "type": "string"
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigCLIAuthBearerToken": {
+    "type": "object",
+    "properties": {
+     "token": {
+      "type": "string"
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigCLIAuthCustomSHA256HMACSignature": {
+    "type": "object",
+    "properties": {
+     "key": {
+      "type": "string"
+     },
+     "signing_secret": {
+      "type": "string"
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigCLIAuthEmpty": {
+    "nullable": true,
+    "x-docs-nullable": true
+   },
+   "DestinationConfigCLIAuthGCPServiceAccount": {
+    "type": "object",
+    "properties": {
+     "service_account_key": {
+      "type": "string"
+     },
+     "scope": {
+      "type": "string",
+      "nullable": true
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigCLIAuthHookdeckSignatureDefault": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+   },
+   "DestinationConfigCLIAuthOAuth2AuthorizationCode": {
+    "type": "object",
+    "properties": {
+     "auth_server": {
+      "type": "string"
+     },
+     "client_id": {
+      "type": "string"
+     },
+     "client_secret": {
+      "type": "string"
+     },
+     "refresh_token": {
+      "type": "string"
+     },
+     "scope": {
+      "type": "string"
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigCLIAuthOAuth2ClientCredentials": {
+    "type": "object",
+    "properties": {
+     "auth_server": {
+      "type": "string"
+     },
+     "client_id": {
+      "type": "string"
+     },
+     "client_secret": {
+      "type": "string"
+     },
+     "scope": {
+      "type": "string"
+     },
+     "authentication_type": {
+      "type": "string",
+      "enum": [
+       "basic",
+       "bearer",
+       "x-www-form-urlencoded"
+      ]
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigCLIAuthStandardWebhooks": {
+    "type": "object",
+    "properties": {
+     "webhook_secret_key": {
+      "type": "string"
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigHTTPAuth": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false,
+    "oneOf": [
+     {
+      "$ref": "#/components/schemas/DestinationConfigHTTPAuthHookdeckSignatureDefault"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigHTTPAuthCustomSHA256HMACSignature"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigHTTPAuthBasicAuth"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigHTTPAuthAPIKey"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigHTTPAuthBearerToken"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigHTTPAuthOAuth2ClientCredentials"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigHTTPAuthOAuth2AuthorizationCode"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigHTTPAuthAWSSignature"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigHTTPAuthGCPServiceAccount"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigHTTPAuthStandardWebhooks"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigHTTPAuthEmpty"
+     }
+    ]
+   },
+   "DestinationConfigHTTPAuthAPIKey": {
+    "type": "object",
+    "properties": {
+     "key": {
+      "type": "string"
+     },
+     "api_key": {
+      "type": "string"
+     },
+     "to": {
+      "type": "string",
+      "enum": [
+       "header",
+       "query"
+      ]
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigHTTPAuthAWSSignature": {
+    "type": "object",
+    "properties": {
+     "access_key_id": {
+      "type": "string"
+     },
+     "secret_access_key": {
+      "type": "string"
+     },
+     "region": {
+      "type": "string"
+     },
+     "service": {
+      "type": "string"
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigHTTPAuthBasicAuth": {
+    "type": "object",
+    "properties": {
+     "username": {
+      "type": "string"
+     },
+     "password": {
+      "type": "string"
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigHTTPAuthBearerToken": {
+    "type": "object",
+    "properties": {
+     "token": {
+      "type": "string"
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigHTTPAuthCustomSHA256HMACSignature": {
+    "type": "object",
+    "properties": {
+     "key": {
+      "type": "string"
+     },
+     "signing_secret": {
+      "type": "string"
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigHTTPAuthEmpty": {
+    "nullable": true,
+    "x-docs-nullable": true
+   },
+   "DestinationConfigHTTPAuthGCPServiceAccount": {
+    "type": "object",
+    "properties": {
+     "service_account_key": {
+      "type": "string"
+     },
+     "scope": {
+      "type": "string",
+      "nullable": true
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigHTTPAuthHookdeckSignatureDefault": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+   },
+   "DestinationConfigHTTPAuthOAuth2AuthorizationCode": {
+    "type": "object",
+    "properties": {
+     "auth_server": {
+      "type": "string"
+     },
+     "client_id": {
+      "type": "string"
+     },
+     "client_secret": {
+      "type": "string"
+     },
+     "refresh_token": {
+      "type": "string"
+     },
+     "scope": {
+      "type": "string"
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigHTTPAuthOAuth2ClientCredentials": {
+    "type": "object",
+    "properties": {
+     "auth_server": {
+      "type": "string"
+     },
+     "client_id": {
+      "type": "string"
+     },
+     "client_secret": {
+      "type": "string"
+     },
+     "scope": {
+      "type": "string"
+     },
+     "authentication_type": {
+      "type": "string",
+      "enum": [
+       "basic",
+       "bearer",
+       "x-www-form-urlencoded"
+      ]
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigHTTPAuthStandardWebhooks": {
+    "type": "object",
+    "properties": {
+     "webhook_secret_key": {
+      "type": "string"
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigMockAPIAuth": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false,
+    "oneOf": [
+     {
+      "$ref": "#/components/schemas/DestinationConfigMockAPIAuthHookdeckSignatureDefault"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigMockAPIAuthCustomSHA256HMACSignature"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigMockAPIAuthBasicAuth"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigMockAPIAuthAPIKey"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigMockAPIAuthBearerToken"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigMockAPIAuthOAuth2ClientCredentials"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigMockAPIAuthOAuth2AuthorizationCode"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigMockAPIAuthAWSSignature"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigMockAPIAuthGCPServiceAccount"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigMockAPIAuthStandardWebhooks"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationConfigMockAPIAuthEmpty"
+     }
+    ]
+   },
+   "DestinationConfigMockAPIAuthAPIKey": {
+    "type": "object",
+    "properties": {
+     "key": {
+      "type": "string"
+     },
+     "api_key": {
+      "type": "string"
+     },
+     "to": {
+      "type": "string",
+      "enum": [
+       "header",
+       "query"
+      ]
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigMockAPIAuthAWSSignature": {
+    "type": "object",
+    "properties": {
+     "access_key_id": {
+      "type": "string"
+     },
+     "secret_access_key": {
+      "type": "string"
+     },
+     "region": {
+      "type": "string"
+     },
+     "service": {
+      "type": "string"
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigMockAPIAuthBasicAuth": {
+    "type": "object",
+    "properties": {
+     "username": {
+      "type": "string"
+     },
+     "password": {
+      "type": "string"
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigMockAPIAuthBearerToken": {
+    "type": "object",
+    "properties": {
+     "token": {
+      "type": "string"
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigMockAPIAuthCustomSHA256HMACSignature": {
+    "type": "object",
+    "properties": {
+     "key": {
+      "type": "string"
+     },
+     "signing_secret": {
+      "type": "string"
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigMockAPIAuthEmpty": {
+    "nullable": true,
+    "x-docs-nullable": true
+   },
+   "DestinationConfigMockAPIAuthGCPServiceAccount": {
+    "type": "object",
+    "properties": {
+     "service_account_key": {
+      "type": "string"
+     },
+     "scope": {
+      "type": "string",
+      "nullable": true
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigMockAPIAuthHookdeckSignatureDefault": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+   },
+   "DestinationConfigMockAPIAuthOAuth2AuthorizationCode": {
+    "type": "object",
+    "properties": {
+     "auth_server": {
+      "type": "string"
+     },
+     "client_id": {
+      "type": "string"
+     },
+     "client_secret": {
+      "type": "string"
+     },
+     "refresh_token": {
+      "type": "string"
+     },
+     "scope": {
+      "type": "string"
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigMockAPIAuthOAuth2ClientCredentials": {
+    "type": "object",
+    "properties": {
+     "auth_server": {
+      "type": "string"
+     },
+     "client_id": {
+      "type": "string"
+     },
+     "client_secret": {
+      "type": "string"
+     },
+     "scope": {
+      "type": "string"
+     },
+     "authentication_type": {
+      "type": "string",
+      "enum": [
+       "basic",
+       "bearer",
+       "x-www-form-urlencoded"
+      ]
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationConfigMockAPIAuthStandardWebhooks": {
+    "type": "object",
+    "properties": {
+     "webhook_secret_key": {
+      "type": "string"
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationDeliveryPolicy": {
+    "type": "object",
+    "properties": {
+     "rate": {
+      "type": "integer",
+      "minimum": 1,
+      "nullable": true
+     },
+     "period": {
+      "type": "string",
+      "enum": [
+       "second",
+       "minute",
+       "hour",
+       "concurrent"
+      ],
+      "nullable": true
+     },
+     "groups": {
+      "$ref": "#/components/schemas/DestinationDeliveryPolicyGroups"
+     }
+    },
+    "additionalProperties": false,
+    "nullable": true
+   },
+   "DestinationDeliveryPolicyGroups": {
+    "type": "object",
+    "properties": {
+     "key": {
+      "type": "string",
+      "pattern": "^(headers|body|query|path)(\\.[\\w-]+)*$",
+      "minLength": 1,
+      "maxLength": 256
+     },
+     "rate": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000
+     },
+     "rate_period": {
+      "$ref": "#/components/schemas/DeliveryGroupRateLimitPeriod"
+     },
+     "overrides": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {
+       "$ref": "#/components/schemas/DeliveryPolicyGroupOverride"
+      },
+      "nullable": true
+     }
+    },
+    "required": [
+     "key",
+     "rate",
+     "rate_period"
+    ],
+    "additionalProperties": false,
+    "nullable": true
+   },
+   "DestinationTypeConfigCLI": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "path_forwarding_disabled": {
+      "type": "boolean"
+     },
+     "http_method": {
+      "type": "string",
+      "enum": [
+       "GET",
+       "POST",
+       "PUT",
+       "PATCH",
+       "DELETE"
+      ],
+      "nullable": true
+     },
+     "auth_type": {
+      "type": "string",
+      "enum": [
+       "HOOKDECK_SIGNATURE",
+       "CUSTOM_SIGNATURE",
+       "BASIC_AUTH",
+       "API_KEY",
+       "BEARER_TOKEN",
+       "OAUTH2_CLIENT_CREDENTIALS",
+       "OAUTH2_AUTHORIZATION_CODE",
+       "AWS_SIGNATURE",
+       "GCP_SERVICE_ACCOUNT",
+       "STANDARD_WEBHOOKS"
+      ],
+      "nullable": true
+     },
+     "auth": {
+      "$ref": "#/components/schemas/DestinationConfigCLIAuth"
+     },
+     "delivery_timeout": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 900,
+      "nullable": true
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "additionalProperties": false
+   },
+   "DestinationTypeConfigHTTP": {
+    "type": "object",
+    "properties": {
+     "url": {
+      "type": "string",
+      "format": "URL"
+     },
+     "delivery_policy": {
+      "$ref": "#/components/schemas/DestinationDeliveryPolicy"
+     },
+     "path_forwarding_disabled": {
+      "type": "boolean"
+     },
+     "http_method": {
+      "type": "string",
+      "enum": [
+       "GET",
+       "POST",
+       "PUT",
+       "PATCH",
+       "DELETE"
+      ],
+      "nullable": true
+     },
+     "auth_type": {
+      "type": "string",
+      "enum": [
+       "HOOKDECK_SIGNATURE",
+       "CUSTOM_SIGNATURE",
+       "BASIC_AUTH",
+       "API_KEY",
+       "BEARER_TOKEN",
+       "OAUTH2_CLIENT_CREDENTIALS",
+       "OAUTH2_AUTHORIZATION_CODE",
+       "AWS_SIGNATURE",
+       "GCP_SERVICE_ACCOUNT",
+       "STANDARD_WEBHOOKS"
+      ],
+      "nullable": true
+     },
+     "auth": {
+      "$ref": "#/components/schemas/DestinationConfigHTTPAuth"
+     },
+     "delivery_timeout": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 900,
+      "nullable": true
+     }
+    },
+    "required": [
+     "url"
+    ],
+    "additionalProperties": false
+   },
+   "DestinationTypeConfigMOCK_API": {
+    "type": "object",
+    "properties": {
+     "delivery_policy": {
+      "$ref": "#/components/schemas/DestinationDeliveryPolicy"
+     },
+     "path_forwarding_disabled": {
+      "type": "boolean"
+     },
+     "http_method": {
+      "type": "string",
+      "enum": [
+       "GET",
+       "POST",
+       "PUT",
+       "PATCH",
+       "DELETE"
+      ],
+      "nullable": true
+     },
+     "auth_type": {
+      "type": "string",
+      "enum": [
+       "HOOKDECK_SIGNATURE",
+       "CUSTOM_SIGNATURE",
+       "BASIC_AUTH",
+       "API_KEY",
+       "BEARER_TOKEN",
+       "OAUTH2_CLIENT_CREDENTIALS",
+       "OAUTH2_AUTHORIZATION_CODE",
+       "AWS_SIGNATURE",
+       "GCP_SERVICE_ACCOUNT",
+       "STANDARD_WEBHOOKS"
+      ],
+      "nullable": true
+     },
+     "auth": {
+      "$ref": "#/components/schemas/DestinationConfigMockAPIAuth"
+     },
+     "delivery_timeout": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 900,
+      "nullable": true
+     }
+    },
+    "additionalProperties": false
+   },
+   "DestinationTypeConfigSQS": {
+    "type": "object",
+    "properties": {
+     "queue_url": {
+      "type": "string",
+      "format": "URL"
+     },
+     "message_group_id": {
+      "$ref": "#/components/schemas/SqsMessageGroupId"
+     },
+     "delivery_policy": {
+      "$ref": "#/components/schemas/DestinationDeliveryPolicy"
+     },
+     "auth": {
+      "$ref": "#/components/schemas/SourceConfigAmazonSQSAuth"
+     },
+     "delivery_timeout": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 900,
+      "nullable": true
+     }
+    },
+    "required": [
+     "queue_url"
+    ],
+    "additionalProperties": false
+   },
+   "FilterRule": {
+    "type": "object",
+    "properties": {
+     "type": {
+      "type": "string",
+      "enum": [
+       "filter"
+      ]
+     },
+     "headers": {
+      "$ref": "#/components/schemas/FilterRuleProperty"
+     },
+     "body": {
+      "$ref": "#/components/schemas/FilterRuleProperty"
+     },
+     "query": {
+      "$ref": "#/components/schemas/FilterRuleProperty"
+     },
+     "path": {
+      "$ref": "#/components/schemas/FilterRuleProperty"
+     }
+    },
+    "required": [
+     "type"
+    ],
+    "additionalProperties": false
+   },
+   "FilterRuleProperty": {
+    "anyOf": [
+     {
+      "type": "string",
+      "nullable": true
+     },
+     {
+      "type": "number",
+      "format": "float",
+      "nullable": true
+     },
+     {
+      "type": "boolean",
+      "nullable": true
+     },
+     {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true,
+      "nullable": true
+     }
+    ],
+    "nullable": true
+   },
+   "RetryRule": {
+    "type": "object",
+    "properties": {
+     "type": {
+      "type": "string",
+      "enum": [
+       "retry"
+      ]
+     },
+     "strategy": {
+      "$ref": "#/components/schemas/RetryStrategy"
+     },
+     "interval": {
+      "type": "integer",
+      "nullable": true
+     },
+     "count": {
+      "type": "integer",
+      "nullable": true
+     },
+     "response_status_codes": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^(?:([2-5]\\d{2})-([2-5]\\d{2})|([><=]{1,2})([2-5]\\d{2})|!?([2-5]\\d{2}))$"
+      },
+      "minItems": 1,
+      "maxItems": 10,
+      "nullable": true
+     }
+    },
+    "required": [
+     "type",
+     "strategy"
+    ],
+    "additionalProperties": false
+   },
+   "RetryStrategy": {
+    "type": "string",
+    "enum": [
+     "linear",
+     "exponential"
+    ]
+   },
+   "Rule": {
+    "anyOf": [
+     {
+      "$ref": "#/components/schemas/RetryRule"
+     },
+     {
+      "$ref": "#/components/schemas/FilterRule"
+     },
+     {
+      "$ref": "#/components/schemas/TransformRule"
+     },
+     {
+      "$ref": "#/components/schemas/DelayRule"
+     },
+     {
+      "$ref": "#/components/schemas/DeduplicateRule"
+     }
+    ]
+   },
+   "SourceConfigAmazonSQSAuth": {
+    "type": "object",
+    "properties": {
+     "access_key_id": {
+      "type": "string"
+     },
+     "secret_access_key": {
+      "type": "string"
+     }
+    },
+    "additionalProperties": false,
+    "nullable": true
+   },
+   "SqsMessageGroupId": {
+    "type": "object",
+    "properties": {
+     "type": {
+      "type": "string",
+      "enum": [
+       "FIXED",
+       "PAYLOAD_FIELD"
+      ]
+     },
+     "value": {
+      "type": "string",
+      "oneOf": [
+       {
+        "type": "string",
+        "pattern": "^body(?:\\.[\\w-]+)+$",
+        "maxLength": 256
+       },
+       {
+        "type": "string",
+        "pattern": "^[!-~]{1,128}$",
+        "maxLength": 128
+       }
+      ]
+     }
+    },
+    "required": [
+     "type",
+     "value"
+    ],
+    "additionalProperties": false,
+    "nullable": true
+   },
+   "TransformRule": {
+    "type": "object",
+    "properties": {
+     "type": {
+      "type": "string",
+      "enum": [
+       "transform"
+      ]
+     },
+     "transformation_id": {
+      "type": "string",
+      "nullable": true
+     },
+     "transformation": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "code": {
+        "type": "string"
+       },
+       "env": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": {
+         "type": "string"
+        },
+        "nullable": true
+       }
+      },
+      "required": [
+       "name",
+       "code"
+      ],
+      "additionalProperties": false
+     }
+    },
+    "required": [
+     "type"
+    ],
+    "additionalProperties": false
+   },
+   "VerificationConfig": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false,
+    "oneOf": [
+     {
+      "$ref": "#/components/schemas/DestinationTypeConfigHTTP",
+      "x-required": true
+     },
+     {
+      "$ref": "#/components/schemas/DestinationTypeConfigCLI",
+      "x-required": true
+     },
+     {
+      "$ref": "#/components/schemas/DestinationTypeConfigMOCK_API"
+     },
+     {
+      "$ref": "#/components/schemas/DestinationTypeConfigSQS",
+      "x-required": true
+     }
+    ],
+    "default": {}
+   }
+  }
+ }
+}

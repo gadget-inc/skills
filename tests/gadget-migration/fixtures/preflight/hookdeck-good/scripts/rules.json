@@ -1,0 +1,4 @@
+[
+  { "type": "retry", "strategy": "exponential", "interval": 60000, "count": 10 },
+  { "type": "deduplicate", "window": 3600000, "include_fields": ["headers.x-shopify-webhook-id"] }
+]

@@ -1,0 +1,9 @@
+// A schema for the pooler check in references/platforms/common.md, which only runs raw queries.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
