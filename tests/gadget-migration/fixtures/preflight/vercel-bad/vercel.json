@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["iad1"],
+  "functions": {
+    "app/routes/api.inngest.ts": { "maxDuration": 800 }
+  },
+  "schedules": {
+    "prune-audit-logs": { "schedule": "0 2 * * *", "path": "/schedules/prune-audit-logs" },
+    "reconcile-shops": { "schedule": "0 * * * *", "path": "/schedules/reconcile-shops" }
+  }
+}

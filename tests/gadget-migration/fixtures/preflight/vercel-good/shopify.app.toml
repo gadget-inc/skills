@@ -1,0 +1,11 @@
+client_id = "0123456789abcdef"
+name = "my-app"
+application_url = "https://app.example.com"
+embedded = true
+
+[webhooks]
+api_version = "2026-04"
+
+  [[webhooks.subscriptions]]
+  topics = ["orders/create"]
+  uri = "/webhooks/orders/create"

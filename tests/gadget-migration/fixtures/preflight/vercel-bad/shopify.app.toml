@@ -1,0 +1,11 @@
+client_id = "0123456789abcdef"
+name = "my-app"
+application_url = "https://my-app-4f9c2a1bc-my-team.vercel.app"
+embedded = true
+
+[webhooks]
+api_version = "2026-04"
+
+  [[webhooks.subscriptions]]
+  topics = ["orders/create"]
+  uri = "/webhooks/orders/create"
