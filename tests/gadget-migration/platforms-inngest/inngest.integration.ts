@@ -217,7 +217,9 @@ describe("references/platforms/inngest.md against the Inngest Dev Server", { ski
     await waitFor(() => calls.filter((c: any) => c.kind === "notify-end" && c.id.startsWith("808-")).length === 2, 30_000, "both jobs");
     const future = calls.find((c: any) => c.kind === "notify-start" && c.id === "808-future");
     const past = calls.find((c: any) => c.kind === "notify-start" && c.id === "808-past");
-    assert.ok(future.at - now >= 4500 && past.at - now < 4500);
+    // the Dev Server starts a run with a ts up to about a second early, as inngest.md says
+    assert.ok(future.at - now >= 3500, `the future job started ${future.at - now} ms after it was sent`);
+    assert.ok(past.at < future.at - 1500, "the job whose startAt had passed ran first");
     await new Promise((resolve) => setTimeout(resolve, 2000));
     assert.equal(calls.filter((c: any) => c.kind === "notify-start" && c.id.startsWith("808-")).length, 2);
     await assert.rejects(requeueScheduledJobs([{ ...jobs[0], action: "somethingElse" }]), /no event for somethingElse/);
