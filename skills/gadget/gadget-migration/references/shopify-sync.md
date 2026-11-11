@@ -116,6 +116,81 @@ Run the reconciliation per store as a job with a concurrency limit per store ([b
 
 Some Shopify models have no webhook topic, such as `shopifyFile`. Gadget kept them current with the `scheduledShopifySync` global action. Add them to the reconciliation, or they stop updating after the move.
 
+## Delete records Shopify deleted before the switch
+
+A reconciliation asks for records updated since its last run, and a deleted record is never in that answer. A record deleted after the move-day backfill and before the switch sends its delete webhook to Gadget only, so the new database keeps it ([Keep Shopify data in sync](https://docs.gadget.dev/guides/moving-to-another-platform#keep-shopify-data-in-sync)). Close that gap once, in the catch-up step of the cutover ([cutover.md](cutover.md), step 9 of [Cut over to the new platform](https://docs.gadget.dev/guides/moving-to-another-platform#cut-over-to-the-new-platform)): for each store and each Shopify model your app deletes records from, list the ids Shopify returns now and delete the rows missing from the list.
+
+An id missing from the list proves a deletion only for a row the list would have returned. A row whose `shopify_updated_at` is later than the moment the list started may be a record created while it ran, so it stays. Another store's rows were never in this store's list, so the delete filters on `shop_id`. An order older than 60 days is missing from every list made without the `read_all_orders` scope, so the caller passes `createdSince` and older rows stay. A partial list fails the same test: a failed or cancelled bulk operation's file holds only some records, and deleting from it removes the rest.
+
+```typescript
+// in app/jobs/deleteMissing.server.ts
+import type { Pool, PoolClient } from "pg";
+
+// Deletes one store's rows whose ids a complete list from Shopify doesn't contain, and returns their ids.
+// Rename shopify_updated_at and shopify_created_at if your tables store Shopify's times under other names.
+export async function deleteMissing(
+  db: Pool | PoolClient,
+  { shopId, table, currentIds, listStartedAt, createdSince }: { shopId: bigint; table: string; currentIds: Set<bigint>; listStartedAt: Date; createdSince?: Date }
+): Promise<bigint[]> {
+  if (!/^[a-z_][a-z0-9_]*$/.test(table)) throw new Error(`unexpected table name: ${table}`);
+  const values: unknown[] = [shopId.toString(), [...currentIds].map(String), listStartedAt];
+  // rows created before createdSince are outside what the query can return, so they stay
+  let window = "";
+  if (createdSince) {
+    values.push(createdSince);
+    window = "and stored.shopify_created_at >= $4";
+  }
+  // a row updated after the list started stays, and so does a row with no Shopify time
+  const { rows } = await db.query(
+    `delete from ${table} as stored
+     where stored.shop_id = $1
+       and stored.shopify_updated_at < $3
+       ${window}
+       and not exists (select 1 from unnest($2::bigint[]) as listed(id) where listed.id = stored.id)
+     returning stored.id`,
+    values
+  );
+  return rows.map((row) => BigInt(row.id));
+}
+```
+
+`not exists` over `unnest` lets Postgres hash the list, so one statement handles a large store. In a local test, a table of 1,000,000 orders and a list of 999,000 ids took 0.6 seconds and deleted the 1,000 missing rows.
+
+The list is a bulk query with only `id`. This example is for orders:
+
+```typescript
+// in app/jobs/sweepDeletedOrders.server.ts
+const START_ID_LIST = `#graphql
+  mutation StartIdList($query: String!) {
+    bulkOperationRunQuery(query: $query) {
+      bulkOperation { id status createdAt }
+      userErrors { field message }
+    }
+  }`;
+
+const response = await admin.graphql(START_ID_LIST, { variables: { query: "{ orders { edges { node { id } } } }" } });
+const { data } = await response.json();
+if (data.bulkOperationRunQuery.userErrors.length) throw new Error(JSON.stringify(data.bulkOperationRunQuery.userErrors));
+// Shopify's clock, which also sets the updated_at values stored in shopify_updated_at
+const listStartedAt = new Date(data.bulkOperationRunQuery.bulkOperation.createdAt);
+
+// once bulkOperation(id:) reports COMPLETED, stream every line of its url as in "Backfill with bulk operations"
+const currentIds = new Set<bigint>();
+for await (const line of lines) if (line) currentIds.add(BigInt(JSON.parse(line).id.split("/").pop()));
+
+const deleted = await deleteMissing(pool, {
+  shopId,
+  table: "shopify_order",
+  currentIds,
+  listStartedAt,
+  // without read_all_orders the list holds the last 60 days of orders; keep a day of margin
+  createdSince: hasReadAllOrders ? undefined : new Date(listStartedAt.getTime() - 59 * 24 * 60 * 60 * 1000),
+});
+console.log(`deleted ${deleted.length} orders from shop ${shopId}`, deleted.map(String));
+```
+
+Start each list after webhooks stop reaching Gadget. A record deleted while the list runs, after the query already read it, stays in the list, and if its delete webhook went to Gadget nothing removes it. In a staged move, sweep each store after its own switch. Gadget ran its delete action when each of these webhooks arrived, so delete the rows without the side effects your delete handler adds. Child rows such as line items go with their parent only through `on delete cascade`; otherwise sweep their table too. Keep the logged ids: if a list turns out wrong, they are the records to restore from your export.
+
 ## Pace calls to each store
 
 Shopify's GraphQL Admin API gives each store 100 points per second on most plans, 200 on Advanced, 1,000 on Shopify Plus, and 2,000 on Shopify for enterprise. One query can cost at most 1,000 points. The limit is counted per app and store, and the new app is the same Shopify app as the Gadget one, so while both run they draw on one allowance for each store.
@@ -156,6 +231,8 @@ export async function pacedGraphql(admin: { graphql: Function }, query: string, 
 - **Running side effects from the move-day backfill.** Gadget already ran them once for every record.
 - **Stopping on one store's error.** Frozen (`402`), locked (`423`), and revoked (`401`) stores fail every time. Record them and move on.
 - **Forgetting sync-only models.** Models without webhooks stop updating the day you switch.
+- **Keeping records deleted before the switch.** Their delete webhooks went to Gadget, and no reconciliation finds them. Sweep each store once after the switch.
+- **Deleting from an incomplete list.** A failed bulk operation's file, or a list without `read_all_orders` and no `createdSince`, deletes records that still exist.
 - **Requests from a host that isn't on the app's IP allowlist.** Shopify answers `403`. See [cutover.md](cutover.md).
 
 ## Related references
