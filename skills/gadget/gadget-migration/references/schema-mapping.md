@@ -128,12 +128,12 @@ Tables with their own id sequence start counting at 1. After loading exported re
 
 ```sql
 -- in db/after_import.sql
-select setval(pg_get_serial_sequence('widget', 'id'), (select max(id) from widget) + 1000000);
+select setval(pg_get_serial_sequence('widget', 'id'), coalesce((select max(id) from widget), 0) + 1000000);
 ```
 
-The gap of 1,000,000 is for the records Gadget keeps creating between the export and the switch. They arrive in the catch-up load with Gadget's next ids, and without the gap the new app hands out the same ids to its own records. Make the gap larger than the number of records Gadget could create in that window.
+The gap of 1,000,000 is for the records Gadget keeps creating between the export and the switch. They arrive in the catch-up load with Gadget's next ids, and without the gap the new app hands out the same ids to its own records. Make the gap larger than the number of records Gadget could create in that window ([Reset id sequences](https://docs.gadget.dev/guides/moving-to-another-platform#reset-id-sequences)).
 
-On an empty table `max(id)` is null and this does nothing, which is fine. Tables for Shopify models use Shopify's ids and have no sequence.
+Keep the `coalesce` for a model with no exported records: there `max(id)` is null, `setval` with a null value changes nothing, and the sequence stays at 1, so Gadget's first record after the export and the new app's first record both get id 1. Tables for Shopify models use Shopify's ids and have no sequence.
 
 ## A Shopify model and a custom model in Prisma
 

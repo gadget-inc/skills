@@ -126,6 +126,29 @@ describe("schema-mapping.md", { skip }, () => {
     await admin.query(`${widget} values (105, 1, 'created in Gadget after the export', null, now())`);
   });
 
+  it("leaves the gap on a model with no exported records, where max(id) is null", async () => {
+    const client = await admin.connect();
+    try {
+      // rolled back at the end: an empty widget table in its own schema, so the snippet runs unchanged
+      await client.query("begin");
+      await client.query("create schema empty_model; set local search_path to empty_model");
+      await client.query("create table widget (id bigserial primary key, name text)");
+      const nextId = async () => Number((await client.query("insert into widget (name) values ('new') returning id")).rows[0].id);
+
+      // without coalesce, setval gets null, changes nothing, and the first new record takes id 1
+      await client.query("savepoint without_coalesce");
+      await client.query("select setval(pg_get_serial_sequence('widget', 'id'), (select max(id) from widget) + 1000000)");
+      assert.equal(await nextId(), 1);
+      await client.query("rollback to savepoint without_coalesce");
+
+      await client.query(sql("schema-mapping.md", "db/after_import.sql"));
+      assert.equal(await nextId(), 1_000_001);
+    } finally {
+      await client.query("rollback");
+      client.release();
+    }
+  });
+
   it("keeps customers with no orders in the computed view", async () => {
     await admin.query("insert into shopify_customer (id, shop_id) values (500, 1), (501, 1)");
     await admin.query("insert into shopify_order (id, shop_id, customer_id, total_price) values (10, 1, 500, 12.50), (12, 1, 500, 5.00)");
