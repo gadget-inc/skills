@@ -1,0 +1,15 @@
+{
+  "name": "my-app",
+  "main": "./workers/app.ts",
+  "compatibility_date": "2026-11-01",
+  "env": {
+    "production": {
+      "vars": { "SHOPIFY_APP_URL": "https://app.example.com" },
+      "d1_databases": [{ "binding": "DB", "database_name": "my-app-db", "database_id": "4b1e7c0a-1f2d-4e3a-9b8c-5d6e7f809a1b", "migrations_dir": "migrations" }]
+    },
+    "staging": {
+      "vars": { "SHOPIFY_APP_URL": "https://staging.example.com" },
+      "d1_databases": [{ "binding": "DB", "database_name": "my-app-staging-db", "database_id": "9c8b7a6f-5e4d-4c3b-a2a1-0f9e8d7c6b5a", "migrations_dir": "migrations" }]
+    }
+  }
+}

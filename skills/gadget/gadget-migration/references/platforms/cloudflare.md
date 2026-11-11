@@ -2,7 +2,9 @@
 
 ## What is this?
 
-On Cloudflare the app runs as a Worker, a function Cloudflare starts for each request or event, with Postgres outside Cloudflare reached through Hyperdrive, Workflows and Queues for background actions, Cron Triggers for scheduled actions, and R2 for files. Each Wrangler environment, such as `staging`, deploys as a separate Worker with its own bindings, the objects through which a Worker reaches those services. Gadget's guide: https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare
+On Cloudflare the app runs as a Worker, a function Cloudflare starts for each request or event, with Workflows and Queues for background actions, Cron Triggers for scheduled actions, and R2 for files. Its database is either D1, Cloudflare's SQLite database, or Postgres outside Cloudflare reached through Hyperdrive. The guide's [Use D1](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#use-d1) and the table before it give the trade-off. Each Wrangler environment, such as `staging`, deploys as a separate Worker with its own bindings, the objects through which a Worker reaches those services. Gadget's guide: https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare
+
+This file's examples use Hyperdrive, and the D1 note under "Complete examples" says what changes. Checks and failure rows marked **Hyperdrive** or **D1** apply to that database only.
 
 For Cloudflare itself (product choice, bindings, Wrangler commands and config), load Cloudflare's `cloudflare` and `wrangler` skills: in Claude Code, `/plugin marketplace add cloudflare/skills` then `/plugin install cloudflare@cloudflare`; elsewhere, `npx skills add https://github.com/cloudflare/skills`. That skill prefers the `cf` CLI for new projects; with this file's `wrangler.jsonc`, use Wrangler. This file covers only what breaks or changes because the app came from Gadget.
 
@@ -16,38 +18,58 @@ node path/to/skills/gadget-migration/scripts/preflight.ts path/to/new-app --plat
 
 | Check | What it catches | How to check by hand |
 |---|---|---|
-| `cloudflare/entry-pipeable-stream`, `cloudflare/prisma-client`, `cloudflare/postgres-session-storage` | The three template files that expect Node: `entry.server.tsx`, Prisma's default client, and the session storage | |
-| `cloudflare/module-scope-client` | A `pg` or `postgres` client created when the module loads | |
+| `cloudflare/entry-pipeable-stream`, `cloudflare/prisma-client` | Two template files that expect Node: `entry.server.tsx` and Prisma's default client. On D1 the Prisma fix is `@prisma/adapter-d1` | |
+| `cloudflare/postgres-session-storage` | **Hyperdrive.** The template's other Node file: Shopify's PostgreSQL session storage | |
+| `cloudflare/module-scope-client` | **Hyperdrive.** A `pg` or `postgres` client created when the module loads | |
 | `cloudflare/kv-session-storage`, `cloudflare/long-running-worker` | Shopify sessions in Workers KV, and a BullMQ `Worker`, which needs a process that never stops. With Containers, or a Fly.io, Render, Railway, or Cloud Run config beside `wrangler.jsonc`, the worker can run there, so it's a warning | |
 | `cloudflare/env-not-inherited` | Bindings, `vars`, or `secrets` at the top of the file that an environment leaves out | `npx wrangler deploy --dry-run --env staging` warns for each, and `npx wrangler secret list --env production` should list every name in `secrets.required` |
 | `cloudflare/shared-resource-name` | One queue, Workflow, bucket, Hyperdrive id, D1 id, or KV id in two environments | `npx wrangler queues info my-app-external` names one consumer, `my-app-production` |
 | `cloudflare/build-env-mismatch` | A script that builds for one environment and deploys another with `--env`, or passes `--env` and builds with no `CLOUDFLARE_ENV`. A script that builds with no `CLOUDFLARE_ENV` at all is meant to run as `CLOUDFLARE_ENV=staging npm run deploy`, so it's a warning only when `vite.config.ts` doesn't stop such a build, as the one below does | After `CLOUDFLARE_ENV=production react-router build`, `npx wrangler deploy --dry-run` lists what would deploy |
 | `cloudflare/types-without-env`, `cloudflare/types-strict-vars` | `wrangler types` without `--env`, or with literal types for a var the template's `vite.config.ts` assigns | |
-| `cloudflare/no-placement`, `cloudflare/cron-weekday`, `cloudflare/queue-max-retries`, `cloudflare/webhook-waituntil`, `cloudflare/r2-dev-url` | Hyperdrive with no `placement`, a numeric weekday in a cron (1 is Sunday), a consumer on the default 3 retries, webhook work in `waitUntil`, and public files on `r2.dev` | |
+| `cloudflare/no-placement` | **Hyperdrive.** Hyperdrive with no `placement` | |
+| `cloudflare/cron-weekday`, `cloudflare/queue-max-retries`, `cloudflare/webhook-waituntil`, `cloudflare/r2-dev-url` | A numeric weekday in a cron (1 is Sunday), a consumer on the default 3 retries, webhook work in `waitUntil`, and public files on `r2.dev` | |
 | `cloudflare/crons-before-cutover` | Cron Triggers, which run from the deploy that adds them | The Worker's Settings > Trigger events in the dashboard. Locally, `curl -X POST "http://localhost:5173/cdn-cgi/handler/scheduled?cron=0+2+*+*+*"` runs that cron's handler |
-| `cloudflare/hyperdrive-caching` | Hyperdrive's 60-second read cache | `npx wrangler hyperdrive get <id>` shows `"caching": { "disabled": true }` |
+| `cloudflare/hyperdrive-caching` | **Hyperdrive.** Hyperdrive's 60-second read cache | `npx wrangler hyperdrive get <id>` shows `"caching": { "disabled": true }` |
 | `cloudflare/r2-cors` | Presigned uploads with no CORS rule on the bucket | `npx wrangler r2 bucket cors list my-app-files` |
+| `cloudflare/d1-transaction` | **D1.** `BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, or `RELEASE` sent through a D1 binding's `prepare()` or `exec()` | |
+| `cloudflare/d1-postgres-sql` | **D1.** Postgres SQL in a string passed to a D1 binding or in a D1 migration: advisory locks, `set_config` and `current_setting`, `::` casts, `= any(...)`, `now()`, `ilike`, the jsonb operators `@>` and `#>>`, and `serial` columns. It skips `text[]`, `timestamptz`, and `jsonb` column types, which SQLite accepts | `npx wrangler d1 migrations apply my-app-staging-db --env staging --local` runs the migrations against local D1 |
+| `cloudflare/d1-columns`, `cloudflare/d1-vector` | **D1.** A table in the migrations, or a Prisma model, with more than 100 columns, and a `vector(n)` column, a Prisma `Unsupported("vector(...)")` field, or a pgvector operator such as `<=>` | |
+| `cloudflare/d1-bound-parameters` | **D1.** A multi-row insert built from one `"(?, ?, ?)"` per row, with nothing in the function that splits the rows. A warning, because the row count comes from the data | |
+| `cloudflare/d1-size` | **D1.** A Shopify app's data in D1, where a database holds at most 10GB at the highest limit on [D1's limits page](https://developers.cloudflare.com/d1/platform/limits/), which can't be raised | `npx wrangler d1 info my-app-db --env production` reports the database's size |
+
+The D1 checks read the migrations folder each `d1_databases` binding names in `migrations_dir`, and `migrations/` when no binding names one and the app has no Hyperdrive binding whose Postgres migrations might live there. On an app with D1 and no Hyperdrive, the script drops `common/prisma-sqlite`, because Prisma on D1 keeps `provider = "sqlite"`.
 
 ## Failure signatures
 
-Every row was reproduced locally with Wrangler 4.160.0 and the Cloudflare Vite plugin 1.68.0, except where the row says otherwise.
+Every row was reproduced locally with Wrangler 4.160.0, with the Cloudflare Vite plugin 1.68.0 for the template's rows and Wrangler's local D1 for the D1 rows, except where the row says otherwise. Where D1 reports an offset, as in `at offset 8`, the number depends on the statement.
 
 | You see | Cause | Fix |
 |---|---|---|
-| `Error: No such module "assets/.prisma/client/default".` on every request | The template's Prisma client | Node-postgres through Hyperdrive, or Prisma with `@prisma/adapter-pg` ([Run Shopify's app template on Workers](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#run-shopify-s-app-template-on-workers)) |
+| `Error: No such module "assets/.prisma/client/default".` on every request | The template's Prisma client | Node-postgres through Hyperdrive, or Prisma with `@prisma/adapter-pg`, or with `@prisma/adapter-d1` on D1 ([Run Shopify's app template on Workers](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#run-shopify-s-app-template-on-workers)) |
 | `TypeError: server_browserExports.renderToPipeableStream is not a function` | The template's `entry.server.tsx` | The entry file below |
-| `Disallowed operation called within global scope. Asynchronous I/O (ex: fetch() or connect()), setting a timeout, and generating random values are not allowed within global scope.` | A `pg` `Client` created when a module loads, which fails every route because all routes share one server build. A `PostgreSQLSessionStorage` created there fails every request that uses it | Open clients inside a handler ([Connect through Hyperdrive](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#connect-through-hyperdrive)) |
-| `The Workers runtime canceled this request because it detected that your Worker's code had hung and would never generate a response.` on the second request | A client opened in one request and kept for the next | A client per request, closed in `finally` |
-| `duplicate key value violates unique constraint "pg_type_typname_nsp_index"` | `PostgreSQLSessionStorage` created per call on an empty database: 10 of 10 concurrent first calls failed in Node | The guide's `workerSessionStorage` |
+| `Disallowed operation called within global scope. Asynchronous I/O (ex: fetch() or connect()), setting a timeout, and generating random values are not allowed within global scope.` | **Hyperdrive.** A `pg` `Client` created when a module loads, which fails every route because all routes share one server build. A `PostgreSQLSessionStorage` created there fails every request that uses it | Open clients inside a handler ([Connect through Hyperdrive](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#connect-through-hyperdrive)) |
+| `The Workers runtime canceled this request because it detected that your Worker's code had hung and would never generate a response.` on the second request | **Hyperdrive.** A client opened in one request and kept for the next | A client per request, closed in `finally` |
+| `duplicate key value violates unique constraint "pg_type_typname_nsp_index"` | **Hyperdrive.** `PostgreSQLSessionStorage` created per call on an empty database: 10 of 10 concurrent first calls failed in Node | The guide's `workerSessionStorage` |
 | `Detected an empty appUrl configuration` under `vite dev` | Every var is inside an environment and `CLOUDFLARE_ENV` isn't set | The `vite.config.ts` below |
 | OAuth and redirects go to `https://staging.example.com` while you test through the `shopify app dev` tunnel | The Worker reads its vars and `.dev.vars`, never the shell. Not even `CLOUDFLARE_INCLUDE_PROCESS_ENV=true` passes the CLI's `SHOPIFY_APP_URL` through | The `vite.config.ts` below, and the development app's secret in `.dev.vars` ([Run your app locally](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#run-your-app-locally)) |
 | `"hyperdrive" exists at the top level, but not on "env.staging".` | Environments don't inherit bindings, `vars`, or `secrets` | Repeat them in each environment |
 | `` You have specified the environment "production" via the `--env/-e` CLI argument. This does not match the target environment "staging" that was used when building the application. `` | A staging build deployed with `--env production` | `CLOUDFLARE_ENV=production react-router build`, then `wrangler deploy` with no `--env` |
 | `No bindings found.` in `wrangler deploy`'s output | A build without `CLOUDFLARE_ENV` deploys the top-level Worker, `my-app` | Build with `CLOUDFLARE_ENV` |
-| `error TS18048: 'env.HYPERDRIVE' is possibly 'undefined'.` | `wrangler types` without `--env` | `wrangler types --env production --strict-vars=false` |
+| `error TS18048: 'env.HYPERDRIVE' is possibly 'undefined'.`, or the same for `env.DB` | `wrangler types` without `--env` | `wrangler types --env production --strict-vars=false` |
 | `vite.config.ts: error TS2322: Type 'string' is not assignable to type '"https://app.example.com"'.` | `wrangler types` gave `SHOPIFY_APP_URL` its literal value, and the template's `vite.config.ts` assigns it | Add `--strict-vars=false` |
 | `403` with `SignatureDoesNotMatch` from a browser upload | The upload's `Content-Type` or size differs from what the URL signed. Reproduced against an S3-compatible server, not R2 | Send the type the server signed, from the same `File` |
 | `WorkflowTimeoutError: Execution timed out after 2000ms`, with the step's timeout in place of 2000, on every attempt | A step past its timeout, 10 minutes by default. From the guide's fact-check | Set `timeout` on the step ([Check your host's time limits](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#check-your-host-s-time-limits)) |
+| `D1_ERROR: To execute a transaction, please use the state.storage.transaction() or state.storage.transactionSync() APIs instead of the SQL BEGIN TRANSACTION or SAVEPOINT statements.`, and more. `exec()` starts it with `D1_EXEC_ERROR: Error in line 1:` | **D1.** `BEGIN TRANSACTION`, `BEGIN`, `COMMIT`, or `SAVEPOINT` through the binding | One `db.batch([...])`, which runs as one transaction ([Use D1](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#use-d1)) |
+| `D1_ERROR: too many SQL variables at offset 417: SQLITE_ERROR` | **D1.** More than 100 bound parameters, such as 250 rows of 3 in one `insert` | `insertRows` below |
+| `D1_ERROR: no such function: set_config at offset 7: SQLITE_ERROR`, and the same for `current_setting`, `pg_try_advisory_xact_lock`, `now`, and `any` | **D1.** Postgres functions, and `= any(?)` | `where shop_id = ?` in each query, a `ShopGate` lease for a lock, `in (?, ?)`, and a time bound from code |
+| `D1_ERROR: unrecognized token: ":" at offset 8: SQLITE_ERROR`, the same with `"@"` or `"#"`, and `D1_ERROR: near "ilike": syntax error` | **D1.** A `::` cast, the jsonb operators `@>` and `#>>`, and `ilike` | `cast(x as integer)`, `json_extract`, and `like` |
+| `near "(": syntax error at offset 65: SQLITE_ERROR` from `wrangler d1 migrations apply` | **D1.** `default now()` in a migration | `default current_timestamp` |
+| `{ id: null }` from `insert ... returning id` | **D1.** A `bigserial primary key` column. SQLite takes the type and generates no values | `integer primary key` |
+| `too many columns on shopify_order: SQLITE_ERROR` from `wrangler d1 execute` or `migrations apply`, after `D1_ERROR: ` through the binding | **D1.** A table with 101 columns. 100 worked | The fields the app reads as columns, the rest in one JSON column ([Use D1](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#use-d1)) |
+| `D1_ERROR: near ">": syntax error` from `order by embedding <=> ?` | **D1.** pgvector. SQLite accepted a `vector(1536)` column and stored the value as text | Vectorize ([Use D1](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#use-d1)) |
+| `Couldn't find a D1 DB with the name or binding 'my-app-db' in your wrangler.jsonc file.` | **D1.** `wrangler d1 migrations apply my-app-db` without `--env production`, when the binding is only inside environments | Add `--env production` |
+| `D1 DB is overloaded. Requests queued for too long.` or `D1 DB is overloaded. Too many requests queued.` | **D1.** More queries than one database runs in turn. From Cloudflare's [D1 debugging page](https://developers.cloudflare.com/d1/observability/debug-d1/): local D1 ran 3,000 concurrent queries without it | One database per store, or Postgres ([Use D1](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#use-d1)) |
+| A write fails once a row passes 2,000,000 bytes | **D1.** From [D1's limits page](https://developers.cloudflare.com/d1/platform/limits/). Local D1 stored a 2.1MB row, so production's error text isn't known | Large values in R2, with the object's key on the record ([Use D1](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#use-d1)) |
 
 ## Complete examples
 
@@ -284,6 +306,36 @@ Against an S3-compatible server with region `auto`, a `PUT` with the signed type
 { "rules": [{ "allowed": { "origins": ["https://app.example.com"], "methods": ["PUT"], "headers": ["content-type"] }, "maxAgeSeconds": 3600 }] }
 ```
 
+### With D1 instead of Hyperdrive
+
+The guide's [Map your models to database tables](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#map-your-models-to-database-tables) lists what changes. In these files:
+
+- **`wrangler.jsonc`:** each environment replaces `hyperdrive` with its own database, such as `"d1_databases": [{ "binding": "DB", "database_name": "my-app-db", "database_id": "<production D1 id>", "migrations_dir": "migrations" }]`, and `my-app-staging-db` in staging. A D1 database has no region to name in `placement`, so drop the hint or measure smart placement as [Run your Worker next to your database](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#run-your-worker-next-to-your-database) describes.
+- **Migrations:** run `npx wrangler d1 migrations apply my-app-db --env production --remote` before the deploy, in place of migrations over the database's connection string.
+- **`workers/app.ts`:** the hourly cron reads stores with `const { results: rows } = await env.DB.prepare("select distinct shop from shopify_session").all<{ shop: string }>()` in place of `withDb`, and each `PruneAuditLogs` step deletes a batch that finishes inside D1's 30-second limit per query.
+- **Locks:** a job that can outlast its interval takes a `ShopGate` lease named for the job, with a limit of 1, in place of `pg_try_advisory_xact_lock`.
+
+A multi-row `insert` stays under D1's 100 bound parameters with this helper. Against local D1, 250 rows of 3 columns went in as 8 statements in one batch, the same rows in one statement failed with `too many SQL variables`, and a duplicate id in the last chunk left the table empty:
+
+```typescript
+// in app/d1.server.ts
+// D1 rejects a statement with more than 100 bound parameters, so each insert holds at most 100 / columns.length rows.
+// table and columns come from your code, never from a request, because they go into the SQL text.
+export async function insertRows(db: D1Database, table: string, columns: string[], rows: unknown[][]) {
+  const perStatement = Math.floor(100 / columns.length);
+  const tuple = `(${columns.map(() => "?").join(", ")})`;
+  const statements: D1PreparedStatement[] = [];
+  for (let i = 0; i < rows.length; i += perStatement) {
+    const chunk = rows.slice(i, i + perStatement);
+    statements.push(db.prepare(`insert into ${table} (${columns.join(", ")}) values ${chunk.map(() => tuple).join(", ")}`).bind(...chunk.flat()));
+  }
+  // batch() runs the statements as one transaction, so a failed statement inserts none of the rows
+  if (statements.length) await db.batch(statements);
+}
+```
+
+D1's 30-second limit covers a whole batch, so split a large load into several calls.
+
 ## Cutover
 
 The order in [cutover.md](../cutover.md) and the guide's [Cut over to the new platform](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#cut-over-to-the-new-platform) holds. On Cloudflare:
@@ -298,3 +350,5 @@ The order in [cutover.md](../cutover.md) and the guide's [Cut over to the new pl
 Run locally with Wrangler 4.160.0, the Cloudflare Vite plugin 1.68.0, Postgres 18.6, and Shopify's React Router template: every example above typechecks after `wrangler types --env production --strict-vars=false`, both environments pass `wrangler deploy --dry-run`, and the app served the webhook, cron, and queue flows described above. The R2 helpers were signed against versitygw 1.0.20, an S3-compatible server, because no MinIO image could be pulled and nothing ran on a Cloudflare account.
 
 Without an account, these come from Cloudflare's documentation and the guide's fact-check: Hyperdrive's caching and its 60-second statement limit, which local Hyperdrive skips; production error texts, which may differ from local ones; whether a failed cron run is retried; Cron propagation; R2's handling of signed `content-length` and of the CORS rule; Queue and Workflow limits; and the ASN and country Shopify sees for a Worker, consumer, cron, or Workflow.
+
+D1 ran in Wrangler 4.160.0's local D1, through `wrangler dev` and `wrangler d1 execute --local`: every D1 failure row above except the last two, `insertRows`, and `wrangler d1 migrations apply --env staging --local`. Local D1 returned no `overloaded` error for 3,000 concurrent queries, stored a 2.1MB row, and accepted `BEGIN TRANSACTION` and `COMMIT` in a file for `wrangler d1 execute --file` and `migrations apply`, which the guide says a remote import rejects. Those limits, the 10GB database size, Time Travel, location hints, the 100KB statement and 5GiB file limits, `wrangler d1 info`'s output, and production's error texts come from Cloudflare's documentation and the guide. The 10GB here is the highest limit Cloudflare lists, and [D1's limits](https://developers.cloudflare.com/d1/platform/limits/), [Hyperdrive's limits](https://developers.cloudflare.com/hyperdrive/platform/limits/), and [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/) give each account's figures.

@@ -2,7 +2,7 @@
 import { DOCS, type CheckModule, type Finding, type Repo } from "./types.ts";
 import { keyLine, lineAt, lineOf, parseJsoncWithLines, parseToml } from "./read-config.ts";
 import { expandScripts } from "./common.ts";
-import { mask } from "./source-scan.ts";
+import { blocks, calls, closing, mask, skipString, skipTemplate } from "./source-scan.ts";
 
 const GUIDE = `${DOCS}/cloudflare`;
 const REF = "references/platforms/cloudflare.md";
@@ -82,6 +82,419 @@ function viteRequiresEnv(repo: Repo): boolean {
   const file = ["vite.config.ts", "vite.config.mts", "vite.config.js", "vite.config.mjs"].find((f) => repo.exists(f));
   const text = file ? mask(repo.read(file) ?? "", false) : "";
   return /!\s*process\.env\.CLOUDFLARE_ENV\b[^;{}]*\)\s*(?:\{\s*)?(?:this\.error|throw)\b|assert\s*\(\s*process\.env\.CLOUDFLARE_ENV\b/.test(text);
+}
+
+// ---------------------------------------------------------------------------------------------
+// The database: Postgres through Hyperdrive, D1, or both
+
+interface D1Binding {
+  binding: string;
+  // the migrations folder, and whether the binding names it or it's Wrangler's default, "migrations"
+  dir: string;
+  explicit: boolean;
+  line?: number;
+}
+
+interface Databases {
+  // a hyperdrive binding in the Wrangler config, or env.HYPERDRIVE in code
+  hyperdrive: boolean;
+  // the d1_databases bindings of every environment
+  d1: D1Binding[];
+}
+
+function databases(repo: Repo, w: Wrangler | null): Databases {
+  const d1: D1Binding[] = [];
+  for (const scope of w ? scopes(w) : []) {
+    (scope.node?.d1_databases ?? []).forEach((d: any, i: number) => {
+      if (!d || typeof d !== "object") return;
+      const explicit = typeof d.migrations_dir === "string" && d.migrations_dir.trim() !== "";
+      const dir = (explicit ? d.migrations_dir.trim() : "migrations").replace(/^\.\//, "").replace(/\/+$/, "");
+      d1.push({ binding: String(d.binding ?? ""), dir, explicit, line: w!.line([...scope.path, "d1_databases", i]) });
+    });
+  }
+  const configured = !!w && scopes(w).some((s) => (s.node?.hyperdrive ?? []).length > 0);
+  const hyperdrive = configured || repo.sourceFiles().some((f) => /\benv\.HYPERDRIVE\b/.test(mask(repo.read(f) ?? "", false)));
+  return { hyperdrive, d1 };
+}
+
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// SQL with comments and the contents of '...' literals blanked, so indexes and lines stay put
+function maskSql(sql: string): string {
+  const out = sql.split("");
+  const wipe = (from: number, to: number) => {
+    for (let k = from; k < to && k < out.length; k++) if (out[k] !== "\n") out[k] = " ";
+  };
+  for (let i = 0; i < sql.length; i++) {
+    if (sql.startsWith("--", i)) {
+      const end = sql.indexOf("\n", i);
+      const stop = end < 0 ? sql.length : end;
+      wipe(i, stop);
+      i = stop;
+    } else if (sql.startsWith("/*", i)) {
+      const end = sql.indexOf("*/", i + 2);
+      const stop = end < 0 ? sql.length : end + 2;
+      wipe(i, stop);
+      i = stop - 1;
+    } else if (sql[i] === "'") {
+      let j = i + 1;
+      while (j < sql.length && !(sql[j] === "'" && sql[j + 1] !== "'")) j += sql[j] === "'" ? 2 : 1;
+      wipe(i + 1, j);
+      i = j;
+    }
+  }
+  return out.join("");
+}
+
+// The expressions that reach a D1 database in one file: env.DB for each binding, a variable or parameter
+// typed D1Database, and a variable set from env.DB. `bare` is the file with comments and strings blanked.
+function d1Receivers(bare: string, bindings: string[]): string | null {
+  const names = [...new Set(bindings.filter((b) => /^[A-Za-z_$][\w$]*$/.test(b)))];
+  const locals = new Set<string>();
+  for (const m of bare.matchAll(/\b([A-Za-z_$][\w$]*)\s*\??\s*:\s*D1Database\b/g)) locals.add(m[1]);
+  if (names.length) {
+    const fromEnv = new RegExp(`\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*(?:[\\w$.]+\\.)?env\\.(?:${names.join("|")})\\b(?!\\s*[.(\\[])`, "g");
+    for (const m of bare.matchAll(fromEnv)) locals.add(m[1]);
+    // const { DB } = env, or const { DB: db } = context.cloudflare.env
+    for (const m of bare.matchAll(/\{([^{}]*)\}\s*=\s*(?:[\w$.]+\.)?env\b(?!\s*\.)/g)) {
+      for (const part of m[1].split(",")) {
+        const [key, alias] = part.split("=")[0].split(":").map((s) => s.trim());
+        if (names.includes(key)) locals.add(alias || key);
+      }
+    }
+  }
+  const parts = [...(names.length ? [`\\benv\\.(?:${names.join("|")})\\b`] : []), ...[...locals].map((l) => `(?<![\\w$.])(?:this\\.)?${escapeRegex(l)}\\b`)];
+  return parts.length ? `(?:${parts.join("|")})` : null;
+}
+
+// The SQL a call passes as its first argument: the string or template literal written there, or the one
+// a const of that name holds in the same file. Everything outside the string's text is blanked, and so are
+// the SQL's own comments and '...' literals. Returns null when the argument is neither.
+function sqlArgument(source: string, code: string, bare: string, open: number, close: number): string | null {
+  let start = open + 1;
+  while (start < close && /\s/.test(source[start])) start++;
+  const literalAt = (i: number): [number, number] | null => {
+    if (source[i] === '"' || source[i] === "'") return [i, skipString(source, i)];
+    if (source[i] === "`") return [i, skipTemplate(source, i)];
+    return null;
+  };
+  let span = literalAt(start);
+  if (!span) {
+    const name = /^[A-Za-z_$][\w$]*/.exec(bare.slice(start, close))?.[0];
+    const next = name ? bare.slice(start + name.length, close).trimStart()[0] : undefined;
+    if (!name || (next && next !== "," && next !== ")")) return null;
+    const decl = new RegExp(`\\bconst\\s+${escapeRegex(name)}\\s*(?::\\s*string\\s*)?=\\s*`).exec(bare);
+    if (!decl) return null;
+    span = literalAt(decl.index + decl[0].length);
+    if (!span) return null;
+  }
+  const chars: string[] = source.split("").map((c) => (c === "\n" ? "\n" : " "));
+  // the string's own text: what masking the strings changed, which leaves out ${...} expressions
+  for (let i = span[0] + 1; i < span[1]; i++) if (code[i] !== bare[i]) chars[i] = code[i];
+  return maskSql(chars.join(""));
+}
+
+interface SqlSource {
+  file: string;
+  // the file's text with everything but SQL blanked, at the file's own indexes
+  sql: string;
+  // migrations go through wrangler, which prints D1's error without the D1_ERROR prefix
+  kind: "migration" | "query";
+}
+
+// SQL a D1 database runs: the files in its migrations folder, and the literals passed to prepare() or
+// exec() on a D1 binding. Also returns the transaction statements sent through a binding.
+function d1Sql(repo: Repo, db: Databases): { sources: SqlSource[]; transactions: Finding[]; receivers: Set<string> } {
+  const sources: SqlSource[] = [];
+  const transactions: Finding[] = [];
+  // files that reach a D1 binding
+  const receivers = new Set<string>();
+  // the default folder only when nothing else claims it: an app on Hyperdrive too may keep Postgres migrations there
+  const dirs = [...new Set(db.d1.filter((d) => d.explicit || !db.hyperdrive).map((d) => d.dir))];
+  for (const dir of dirs) {
+    for (const file of repo.find(new RegExp(`^${escapeRegex(dir)}/[^/]+\\.sql$`))) {
+      sources.push({ file, sql: maskSql(repo.read(file) ?? ""), kind: "migration" });
+    }
+  }
+  const bindings = db.d1.map((d) => d.binding);
+  for (const file of repo.sourceFiles()) {
+    const source = repo.read(file);
+    if (!source) continue;
+    const code = mask(source, false);
+    const bare = mask(source);
+    const receiver = d1Receivers(bare, bindings);
+    if (!receiver || !new RegExp(receiver).test(bare)) continue;
+    receivers.add(file);
+    // one view of the file with the SQL of every call in place
+    const view: string[] = source.split("").map((c) => (c === "\n" ? "\n" : " "));
+    let found = false;
+    // transaction statements: where each is written, and which method sends it
+    const statements = new Map<number, { statement: string; method: string }>();
+    for (const call of calls(source, `${receiver}\\s*\\.\\s*(?:prepare|exec)`)) {
+      const sql = sqlArgument(source, code, bare, call.open, call.close);
+      if (!sql) continue;
+      found = true;
+      for (let i = 0; i < sql.length; i++) if (sql[i] !== " " && sql[i] !== "\n") view[i] = sql[i];
+      const begin = statementStart(sql);
+      if (begin) statements.set(begin.index, { statement: begin.statement.toUpperCase(), method: /\.\s*exec\s*\($/.test(bare.slice(call.index, call.open + 1)) ? "exec" : "prepare" });
+    }
+    if (found) sources.push({ file, sql: view.join(""), kind: "query" });
+    if (statements.size) {
+      const [index, { statement, method }] = [...statements].sort((a, b) => a[0] - b[0])[0];
+      const all = [...new Set([...statements.values()].map((s) => s.statement))].join(", ");
+      transactions.push({
+        id: "cloudflare/d1-transaction",
+        severity: "error",
+        file,
+        line: lineAt(source, index),
+        message: `This sends ${statements.size > 1 ? all : statement} through a D1 binding's ${method}(). D1 runs each query as its own transaction and rejects transaction statements, so this fails every time${method === "exec" ? ", reported as D1_EXEC_ERROR" : ""}.`,
+        error: "To execute a transaction, please use the state.storage.transaction() or state.storage.transactionSync() APIs instead of the SQL BEGIN TRANSACTION or SAVEPOINT statements.",
+        fix: "Send the statements together as db.batch([...]), which D1 runs as one transaction. Code that reads a row and decides what to write in between has to become statements that decide in SQL, such as insert ... on conflict.",
+        docs: `${GUIDE}#use-d1`,
+      });
+    }
+  }
+  return { sources, transactions, receivers };
+}
+
+// A transaction statement that starts the SQL or follows one of its ";"s, with its index.
+function statementStart(sql: string): { index: number; statement: string } | null {
+  const first = sql.search(/\S/);
+  if (first < 0) return null;
+  const m = /(?:^|;)\s*(begin|commit|end\s+transaction|rollback|savepoint|release)\b/i.exec(sql.slice(first));
+  return m ? { index: first + m.index + m[0].length - m[1].length, statement: m[1].replace(/\s+/g, " ") } : null;
+}
+
+// Postgres SQL that SQLite rejects or, for serial, accepts and gets wrong. Each error is what local D1
+// returned in Wrangler 4.160.0, after "D1_ERROR: " through a binding and before " at offset <n>: SQLITE_ERROR".
+interface SqlRule {
+  pattern: RegExp;
+  // what the SQL uses, as a noun phrase; group 1, when there is one, is where the finding points
+  what: (m: RegExpExecArray) => string;
+  error?: (m: RegExpExecArray, kind: SqlSource["kind"]) => string;
+  // what happens instead of an error, for SQL that SQLite accepts
+  result?: (m: RegExpExecArray) => string;
+  fix: string;
+  docs: string;
+}
+
+const POSTGRES_ONLY: SqlRule[] = [
+  {
+    pattern: /\b(pg_\w*advisory\w*)\s*\(/i,
+    what: (m) => `${m[1]}, a Postgres advisory lock`,
+    error: (m) => `no such function: ${m[1]}`,
+    fix: "Take a lease from the guide's ShopGate Durable Object instead, named for the job, with a limit of 1.",
+    docs: `${GUIDE}#limit-concurrency-per-store`,
+  },
+  {
+    pattern: /\b(set_config|current_setting)\s*\(/i,
+    what: (m) => `${m[1]}, which Postgres row-level security reads`,
+    error: (m) => `no such function: ${m[1]}`,
+    fix: "D1 has no row-level security, so name the store in each query, such as where shop_id = ?, in your data access code.",
+    docs: `${GUIDE}#use-d1`,
+  },
+  {
+    pattern: /(?<!:)::(?!:)\s*[A-Za-z_]/,
+    what: () => "a Postgres :: cast",
+    error: () => 'unrecognized token: ":"',
+    fix: "Write cast(value as integer), or leave the cast out.",
+    docs: `${GUIDE}#use-d1`,
+  },
+  {
+    pattern: /=\s*any\s*\(/i,
+    what: () => "= any(...), which takes a Postgres array",
+    error: () => "no such function: any",
+    fix: "Write in (?, ?) with one placeholder per value, staying under 100 bound parameters.",
+    docs: `${GUIDE}#map-your-models-to-database-tables`,
+  },
+  {
+    pattern: /\bnow\s*\(\s*\)/i,
+    what: () => "now()",
+    error: (_m, kind) => (kind === "migration" ? 'near "(": syntax error' : "no such function: now"),
+    fix: "Bind the time from code, such as new Date().toISOString(), or write a column default as default current_timestamp.",
+    docs: `${GUIDE}#use-d1`,
+  },
+  {
+    pattern: /\bilike\b/i,
+    what: () => "ilike",
+    error: () => 'near "ilike": syntax error',
+    fix: "Use like, which SQLite already compares without case for ASCII letters.",
+    docs: `${GUIDE}#use-d1`,
+  },
+  {
+    pattern: /@>|<@(?!>)|(?<!<)#>>?/,
+    what: (m) => `${m[0]}, a Postgres jsonb operator`,
+    error: (m) => `unrecognized token: "${m[0].includes("@") ? "@" : "#"}"`,
+    fix: "Read JSON with json_extract(column, '$.key') or column ->> '$.key'.",
+    docs: `${GUIDE}#use-d1`,
+  },
+  {
+    pattern: /(?:^|[(,])\s*["`[]?[A-Za-z_]\w*["`\]]?\s+((?:small|big)?serial)\b/im,
+    what: (m) => `a ${m[1]} column`,
+    result: (m) => `SQLite takes ${m[1]} as a type name and generates no values, so an insert that leaves out the id stores null: insert ... returning id gave { id: null }`,
+    fix: "Declare the key as integer primary key, which SQLite fills in.",
+    docs: `${GUIDE}#use-d1`,
+  },
+];
+
+function d1Findings(repo: Repo, db: Databases, w: Wrangler | null): Finding[] {
+  const findings: Finding[] = [];
+  const { sources, transactions, receivers } = d1Sql(repo, db);
+  findings.push(...transactions);
+  const prefix = (kind: SqlSource["kind"]) => (kind === "query" ? "D1_ERROR: " : "");
+  const where = (kind: SqlSource["kind"]) => (kind === "migration" ? "This D1 migration uses" : "A query sent to D1 here uses");
+
+  for (const { file, sql, kind } of sources) {
+    for (const rule of POSTGRES_ONLY) {
+      const matches = [...sql.matchAll(new RegExp(rule.pattern.source, rule.pattern.flags + "g"))] as RegExpExecArray[];
+      if (!matches.length) continue;
+      const m = matches[0];
+      const at = m[1] !== undefined ? m.index! + m[0].lastIndexOf(m[1]) : m.index! + m[0].search(/\S/);
+      const more = matches.length > 1 ? ` This file has ${matches.length} of them.` : "";
+      findings.push({
+        id: "cloudflare/d1-postgres-sql",
+        severity: "error",
+        file,
+        line: lineAt(sql, at),
+        message: `${where(kind)} ${rule.what(m)}. ${rule.result ? `${rule.result(m)}.` : "D1 is SQLite and rejects it."}${more}`,
+        error: rule.error ? `${prefix(kind)}${rule.error(m, kind)}` : undefined,
+        fix: rule.fix,
+        docs: rule.docs,
+      });
+    }
+
+    // pgvector types and operators
+    const vector = /(?:^|[(,])\s*["`[]?[A-Za-z_]\w*["`\]]?\s+(vector\s*\(\s*\d+\s*\))/im.exec(sql) ?? /<=>|<->|<#>/.exec(sql);
+    if (vector) {
+      const column = vector[1] !== undefined;
+      findings.push({
+        id: "cloudflare/d1-vector",
+        severity: "error",
+        file,
+        line: lineAt(sql, vector.index! + (column ? vector[0].lastIndexOf(vector[1]) : 0)),
+        message: column
+          ? `${kind === "migration" ? "This D1 migration declares" : "A statement sent to D1 here declares"} a ${vector[1].replace(/\s+/g, "")} column. SQLite accepts it as a type name and stores the value as text, and it has no vector operators, so a similarity search such as order by embedding <=> ? fails.`
+          : `${where(kind)} the pgvector operator ${vector[0]}, which SQLite doesn't have.`,
+        // a column's error comes from the query that searches it, through the binding
+        error: `${column ? "D1_ERROR: " : prefix(kind)}${vector[0].includes("#") ? 'unrecognized token: "#"' : 'near ">": syntax error'}`,
+        fix: "Store embeddings in Vectorize, keyed by the record's id, and query it for the nearest ones, or keep this model in Postgres with pgvector.",
+        docs: `${GUIDE}#use-d1`,
+      });
+    }
+
+    // tables wider than D1's 100 columns
+    if (kind === "migration") {
+      for (const m of sql.matchAll(/\bcreate\s+(?:temp(?:orary)?\s+)?table\s+(?:if\s+not\s+exists\s+)?([\w."`[\]]+)\s*\(/gi)) {
+        const open = m.index! + m[0].length - 1;
+        const close = closing(sql, open);
+        if (close < 0) continue;
+        const entries: string[] = [];
+        let depth = 0;
+        let from = open + 1;
+        for (let i = open + 1; i <= close; i++) {
+          const c = sql[i];
+          if (c === "(") depth++;
+          else if (c === ")" && i < close) depth--;
+          if ((c === "," && depth === 0) || i === close) {
+            entries.push(sql.slice(from, i).trim());
+            from = i + 1;
+          }
+        }
+        const columns = entries.filter((e) => e && !/^(constraint|primary\s+key|foreign\s+key|unique|check)\b/i.test(e)).length;
+        if (columns > 100) findings.push(wideTable(file, lineAt(sql, m.index!), m[1].replace(/["`[\]]/g, ""), columns));
+      }
+    }
+  }
+
+  // Prisma on D1: a sqlite schema in an app with a D1 binding
+  const schemaPath = repo.find(/(^|\/)schema\.prisma$/)[0];
+  // comments blanked, so a note about Unsupported("vector(1536)") isn't a field
+  const schema = schemaPath ? (repo.read(schemaPath) ?? "").replace(/\/\/.*$/gm, (c) => " ".repeat(c.length)) : "";
+  if (schemaPath && /datasource\s+\w+\s*\{[^}]*provider\s*=\s*"sqlite"/.test(schema)) {
+    const models = [...schema.matchAll(/^model\s+(\w+)\s*\{/gm)];
+    const names = new Set(models.map((m) => m[1]));
+    for (const m of models) {
+      const open = m.index! + m[0].length - 1;
+      const close = schema.indexOf("\n}", open);
+      const body = schema.slice(open + 1, close < 0 ? schema.length : close);
+      let columns = 0;
+      for (const row of body.split("\n")) {
+        const field = /^\s*([A-Za-z_]\w*)\s+([A-Za-z_]\w*)/.exec(row);
+        if (field && !names.has(field[2])) columns++;
+      }
+      const table = /@@map\(\s*"([^"]+)"/.exec(body)?.[1] ?? m[1];
+      if (columns > 100) findings.push(wideTable(schemaPath, lineAt(schema, m.index!), table, columns, `model ${m[1]}`));
+    }
+    const vector = /Unsupported\(\s*"vector[^"]*"\s*\)/.exec(schema);
+    if (vector) {
+      findings.push({
+        id: "cloudflare/d1-vector",
+        severity: "error",
+        file: schemaPath,
+        line: lineAt(schema, vector.index!),
+        message: `This Prisma schema for D1 declares ${vector[0]}. SQLite accepts it as a type name and stores the value as text, and it has no vector operators, so a similarity search fails.`,
+        error: 'D1_ERROR: near ">": syntax error',
+        fix: "Store embeddings in Vectorize, keyed by the record's id, and query it for the nearest ones, or keep this model in Postgres with pgvector.",
+        docs: `${GUIDE}#use-d1`,
+      });
+    }
+  }
+
+  // multi-row inserts with one "(?, ?, ?)" per row and nothing that splits the rows
+  for (const file of receivers) {
+    const source = repo.read(file) ?? "";
+    const code = mask(source, false);
+    const bare = mask(source);
+    const spans = blocks(bare);
+    for (const m of code.matchAll(/(=>\s*|\.fill\s*\(\s*)(["'`])(\(\s*\?(?:\s*,\s*\?)*\s*\))\2/g)) {
+      const perRow = (m[3].match(/\?/g) ?? []).length;
+      const at = m.index! + m[1].length;
+      // the outermost block around it: the function, or the class for a method
+      const enclosing = spans.filter(([s, e]) => s <= at && at <= e).sort((a, b) => a[0] - b[0])[0];
+      const scope = enclosing ? bare.slice(enclosing[0], enclosing[1] + 1) : bare;
+      if (/\.slice\s*\(|\.splice\s*\(|chunk|for\s*\([^;)]*;[^;)]*;[^)]*\+=/i.test(scope)) continue;
+      const rows = Math.floor(100 / perRow);
+      findings.push({
+        id: "cloudflare/d1-bound-parameters",
+        severity: "warning",
+        file,
+        line: lineAt(source, at),
+        message: `This builds one ${m[3]} per row, ${perRow} bound parameter${perRow === 1 ? "" : "s"} each, and nothing in the function splits the rows. D1 allows 100 bound parameters per query, so an insert of more than ${rows} rows fails, which depends on how many rows a caller passes.`,
+        error: "D1_ERROR: too many SQL variables",
+        fix: `Insert at most ${rows} rows per statement, as the insertRows helper in ${REF} does.`,
+        docs: `${GUIDE}#use-d1`,
+      });
+    }
+  }
+
+  // the 10GB a database holds, for an app whose Shopify models live in D1
+  const deps = repo.dependencies();
+  if (Object.keys(deps).some((d) => d.startsWith("@shopify/shopify-app") || d === "@shopify/shopify-api")) {
+    const bindings = [...new Set(db.d1.map((d) => d.binding))].join(", ");
+    findings.push({
+      id: "cloudflare/d1-size",
+      severity: "manual",
+      file: w?.file,
+      line: db.d1[0].line,
+      message: `This Shopify app keeps its data in D1 (${bindings}). A D1 database holds at most 10GB, the highest limit Cloudflare lists, and it can't be raised: 2.4 million records at 2KB each take 4.8GB before their indexes.`,
+      fix: "Estimate each model's size from its record count in Gadget, and after loading run npx wrangler d1 info <database> --env production for the database's size. If the data nears a few gigabytes, give each store its own database or keep the largest models in Postgres through Hyperdrive. Cloudflare's D1 limits page lists your account's figure: https://developers.cloudflare.com/d1/platform/limits/",
+      docs: `${GUIDE}#use-d1`,
+    });
+  }
+  return findings;
+}
+
+function wideTable(file: string, line: number, table: string, columns: number, what = table): Finding {
+  return {
+    id: "cloudflare/d1-columns",
+    severity: "error",
+    file,
+    line,
+    message: `${what} has ${columns} columns, and D1 allows 100 per table, so creating ${table} fails. Gadget's Shopify models, such as shopifyOrder, can have more than 200 stored fields.`,
+    error: `too many columns on ${table}: SQLITE_ERROR`,
+    fix: "Keep the fields your app reads as columns and store the rest in one JSON column that queries read with json_extract, or keep this model in Postgres through Hyperdrive.",
+    docs: `${GUIDE}#use-d1`,
+  };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -238,6 +651,8 @@ function configFindings(repo: Repo, w: Wrangler): Finding[] {
 
 function scriptFindings(repo: Repo, w: Wrangler | null): Finding[] {
   const findings: Finding[] = [];
+  // a binding the generated Env would mark optional, for the error text: the database's, when an environment has one
+  const envBinding = (w ? scopes(w).slice(1) : []).flatMap((s) => [...(s.node?.hyperdrive ?? []), ...(s.node?.d1_databases ?? [])]).map((b: any) => b?.binding).find((b) => typeof b === "string") ?? "HYPERDRIVE";
   const pkg = repo.read("package.json") ?? "";
   const scripts = repo.scripts();
   const hasEnvs = !!w && Object.keys(w.config.env ?? {}).length > 0;
@@ -302,9 +717,9 @@ function scriptFindings(repo: Repo, w: Wrangler | null): Finding[] {
           file: "package.json",
           line,
           message: `The "${name}" script runs wrangler types without --env. Every binding in ${w!.file} is inside an environment, so the generated Env marks each one optional.`,
-          error: "error TS18048: 'env.HYPERDRIVE' is possibly 'undefined'.",
+          error: `error TS18048: 'env.${envBinding}' is possibly 'undefined'.`,
           fix: "Run wrangler types --env production --strict-vars=false.",
-          docs: `${GUIDE}#connect-through-hyperdrive`,
+          docs: `${GUIDE}#run-your-app-locally`,
         });
       }
       const viteConfig = ["vite.config.ts", "vite.config.mts", "vite.config.js"].map((f) => [f, repo.read(f)] as const).find(([, t]) => t);
@@ -319,7 +734,7 @@ function scriptFindings(repo: Repo, w: Wrangler | null): Finding[] {
           message: `wrangler types types each var as its literal value, and ${viteConfig![0]} assigns process.env.${assigned[1]}, as Shopify's template does, so tsc fails.`,
           error: "error TS2322: Type 'string' is not assignable to type '\"https://app.example.com\"'.",
           fix: `Add --strict-vars=false to the "${name}" script.`,
-          docs: `${GUIDE}#connect-through-hyperdrive`,
+          docs: `${GUIDE}#run-your-app-locally`,
         });
       }
     }
@@ -327,8 +742,11 @@ function scriptFindings(repo: Repo, w: Wrangler | null): Finding[] {
   return findings;
 }
 
-function codeFindings(repo: Repo, elsewhere: string | null): Finding[] {
+// The Postgres checks below need no gate on Hyperdrive: each looks for pg, postgres, or Shopify's
+// PostgreSQL session storage, which a D1 app doesn't import, and each fails the same way without Hyperdrive.
+function codeFindings(repo: Repo, elsewhere: string | null, db: Databases): Finding[] {
   const findings: Finding[] = [];
+  const d1Only = db.d1.length > 0 && !db.hyperdrive;
   const deps = repo.dependencies();
   const hasAdapter = Object.keys(deps).some((d) => d.startsWith("@prisma/adapter-"));
   let prismaReported = false;
@@ -361,7 +779,9 @@ function codeFindings(repo: Repo, elsewhere: string | null): Finding[] {
         line: lineOf(text, /from\s+["']@prisma\/client["']/),
         message: "This imports Prisma's default client, as Shopify's template does, and no Prisma driver adapter is installed. The default client doesn't load on Workers, so every request fails.",
         error: 'Error: No such module "assets/.prisma/client/default".',
-        fix: "Use node-postgres through Hyperdrive with a client opened per request, or create a Prisma client per request with @prisma/adapter-pg as Prisma's Cloudflare guide shows.",
+        fix: d1Only
+          ? "Create a Prisma client per request with @prisma/adapter-d1 on the D1 binding, as Prisma's Cloudflare guide shows."
+          : "Use node-postgres through Hyperdrive with a client opened per request, or create a Prisma client per request with @prisma/adapter-pg as Prisma's Cloudflare guide shows.",
         docs: `${GUIDE}#run-shopify-s-app-template-on-workers`,
       });
     }
@@ -402,7 +822,7 @@ function codeFindings(repo: Repo, elsewhere: string | null): Finding[] {
         file,
         line: lineOf(text, "@shopify/shopify-app-session-storage-kv"),
         message: "Sessions in Workers KV: a KV write can take 60 seconds or more to reach other data centers, and expiring offline tokens change every hour, so a job elsewhere can read a token from before the refresh.",
-        fix: "Keep sessions in Postgres, as in the guide's workerSessionStorage.",
+        fix: d1Only ? "Keep sessions in a D1 table, with one statement per SessionStorage method on the binding." : "Keep sessions in Postgres, as in the guide's workerSessionStorage.",
         docs: `${GUIDE}#run-shopify-s-app-template-on-workers`,
       });
     }
@@ -461,7 +881,7 @@ function codeFindings(repo: Repo, elsewhere: string | null): Finding[] {
       message: `This Env marks ${optional[1]} optional, which wrangler types does for a binding that only appears inside an environment when it runs without --env.`,
       error: `error TS18048: 'env.${optional[1]}' is possibly 'undefined'.`,
       fix: "Regenerate it with wrangler types --env production --strict-vars=false.",
-      docs: `${GUIDE}#connect-through-hyperdrive`,
+      docs: `${GUIDE}#run-your-app-locally`,
     });
   }
   return findings;
@@ -475,10 +895,14 @@ export const cloudflare: CheckModule = {
   // cloudflare/long-running-worker reports a BullMQ worker instead. That holds only while nothing else
   // runs processes: with Containers, or a Fly.io, Render, Railway, or Cloud Run config beside wrangler,
   // the Dockerfile, the worker, and its scripts may run there, so their common findings stand.
+  // Prisma on D1 keeps provider = "sqlite", which common/prisma-sqlite reports as the template's leftover.
   suppresses: (repo) => {
-    const w = readWrangler(repo);
-    if (processHost(repo, w && !("error" in w) ? w : null)) return [];
-    return ["common/migrate-on-start", "common/cron-script-exit", "common/worker-sigterm"];
+    const read = readWrangler(repo);
+    const w = read && !("error" in read) ? read : null;
+    const db = databases(repo, w);
+    const prisma = db.d1.length > 0 && !db.hyperdrive ? ["common/prisma-sqlite"] : [];
+    if (processHost(repo, w)) return prisma;
+    return ["common/migrate-on-start", "common/cron-script-exit", "common/worker-sigterm", ...prisma];
   },
   run: (repo) => {
     const findings: Finding[] = [];
@@ -496,7 +920,9 @@ export const cloudflare: CheckModule = {
       findings.push(...configFindings(repo, w));
     }
     const config = w && !("error" in w) ? w : null;
-    findings.push(...scriptFindings(repo, config), ...codeFindings(repo, processHost(repo, config)));
+    const db = databases(repo, config);
+    findings.push(...scriptFindings(repo, config), ...codeFindings(repo, processHost(repo, config), db));
+    if (db.d1.length) findings.push(...d1Findings(repo, db, config));
     return findings;
   },
 };

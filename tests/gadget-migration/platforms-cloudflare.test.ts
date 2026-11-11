@@ -227,6 +227,137 @@ describe("Cloudflare checks on cloudflare-good", () => {
   });
 });
 
+// the checks that assume Postgres through Hyperdrive, which a D1-only app never gets
+const HYPERDRIVE_ONLY = ["cloudflare/no-placement", "cloudflare/hyperdrive-caching", "cloudflare/module-scope-client", "cloudflare/postgres-session-storage"];
+
+describe("Cloudflare checks on cloudflare-d1-bad, an app on D1 only", () => {
+  const findings = cloudflareFindings(fixture("cloudflare-d1-bad"));
+  const expected: [string, "error" | "warning" | "manual", string, number][] = [
+    // typegen runs wrangler types without --env, and the Prisma client has no D1 adapter
+    ["cloudflare/types-without-env", "warning", "package.json", 9],
+    ["cloudflare/prisma-client", "error", "app/prisma.server.ts", 1],
+    // BEGIN TRANSACTION, then COMMIT, each through env.DB.prepare: one finding for the file
+    ["cloudflare/d1-transaction", "error", "app/db.server.ts", 15],
+    // set_config, = any(?), and a :: cast through env.DB, and an advisory lock through const db = env.DB
+    ["cloudflare/d1-postgres-sql", "error", "app/db.server.ts", 5],
+    ["cloudflare/d1-postgres-sql", "error", "app/db.server.ts", 6],
+    ["cloudflare/d1-postgres-sql", "error", "app/db.server.ts", 10],
+    ["cloudflare/d1-postgres-sql", "error", "app/jobs.server.ts", 6],
+    // ilike and @> in a const passed to prepare()
+    ["cloudflare/d1-postgres-sql", "error", "app/search.server.ts", 4],
+    ["cloudflare/d1-postgres-sql", "error", "app/search.server.ts", 5],
+    // bigserial and default now() in a migration; text[] and timestamptz, which SQLite accepts, aren't reported
+    ["cloudflare/d1-postgres-sql", "error", "migrations/0001_init.sql", 3],
+    ["cloudflare/d1-postgres-sql", "error", "migrations/0001_init.sql", 6],
+    ["cloudflare/d1-columns", "error", "migrations/0002_shopify_order.sql", 2],
+    ["cloudflare/d1-vector", "error", "migrations/0003_embeddings.sql", 3],
+    ["cloudflare/d1-vector", "error", "prisma/schema.prisma", 14],
+    ["cloudflare/d1-bound-parameters", "warning", "app/orders.server.ts", 2],
+    ["cloudflare/d1-size", "manual", "wrangler.jsonc", 8],
+  ];
+
+  for (const [id, severity, file, line] of expected) {
+    it(`reports ${id} at ${file}:${line}`, () => {
+      const found = findings.find((f) => f.id === id && f.file === file && f.line === line);
+      assert.ok(found, `missing ${id} at ${file}:${line}; got:\n${findings.map(where).join("\n")}`);
+      assert.equal(found.severity, severity);
+      assert.ok(found.fix.length > 0 && found.message.length > 0);
+      assert.match(found.docs ?? "", /^https:\/\/docs\.gadget\.dev\/guides\/moving-to-another-platform\/cloudflare#/);
+    });
+  }
+
+  it("reports nothing else, and none of the Hyperdrive checks", () => {
+    assert.equal(findings.length, expected.length, findings.map(where).join("\n"));
+    assert.deepEqual(findings.filter((f) => HYPERDRIVE_ONLY.includes(f.id)).map(where), []);
+  });
+
+  it("gives the error text local D1 returns", () => {
+    const text = (file: string, line: number) => findings.find((f) => f.file === file && f.line === line)?.error;
+    assert.equal(text("app/db.server.ts", 15), "To execute a transaction, please use the state.storage.transaction() or state.storage.transactionSync() APIs instead of the SQL BEGIN TRANSACTION or SAVEPOINT statements.");
+    assert.equal(text("app/db.server.ts", 5), "D1_ERROR: no such function: set_config");
+    assert.equal(text("app/db.server.ts", 6), "D1_ERROR: no such function: any");
+    assert.equal(text("app/db.server.ts", 10), 'D1_ERROR: unrecognized token: ":"');
+    assert.equal(text("app/jobs.server.ts", 6), "D1_ERROR: no such function: pg_try_advisory_xact_lock");
+    assert.equal(text("app/search.server.ts", 4), 'D1_ERROR: near "ilike": syntax error');
+    assert.equal(text("app/search.server.ts", 5), 'D1_ERROR: unrecognized token: "@"');
+    // wrangler d1 migrations apply prints D1's error without the D1_ERROR prefix
+    assert.equal(text("migrations/0001_init.sql", 6), 'near "(": syntax error');
+    assert.equal(text("migrations/0001_init.sql", 3), undefined);
+    assert.match(findings.find((f) => f.file === "migrations/0001_init.sql" && f.line === 3)!.message, /\{ id: null \}/);
+    assert.equal(text("migrations/0002_shopify_order.sql", 2), "too many columns on shopify_order: SQLITE_ERROR");
+    assert.match(findings.find((f) => f.id === "cloudflare/d1-columns")!.message, /101 columns/);
+    assert.equal(text("migrations/0003_embeddings.sql", 3), 'D1_ERROR: near ">": syntax error');
+    assert.equal(text("app/orders.server.ts", 2), "D1_ERROR: too many SQL variables");
+    assert.match(findings.find((f) => f.id === "cloudflare/d1-bound-parameters")!.message, /more than 33 rows/);
+    assert.equal(text("package.json", 9), "error TS18048: 'env.DB' is possibly 'undefined'.");
+  });
+
+  it("points Prisma at the D1 adapter and keeps the D1 schema's sqlite provider", () => {
+    assert.match(findings.find((f) => f.id === "cloudflare/prisma-client")!.fix, /@prisma\/adapter-d1/);
+    // Prisma on D1 says provider = "sqlite", which common/prisma-sqlite reports for the template's leftover
+    assert.ok(preflight(fixture("cloudflare-d1-bad"), []).findings.some((f) => f.id === "common/prisma-sqlite"));
+    assert.ok(!preflight(fixture("cloudflare-d1-bad"), ["cloudflare"]).findings.some((f) => f.id === "common/prisma-sqlite"));
+  });
+});
+
+describe("Cloudflare checks on cloudflare-d1-good", () => {
+  it("reports only the D1 size reminder", () => {
+    assert.deepEqual(cloudflareFindings(fixture("cloudflare-d1-good")).map((f) => `${f.severity} ${where(f)}`), ["manual cloudflare/d1-size wrangler.jsonc:8"]);
+  });
+});
+
+describe("D1 checks", () => {
+  // a D1-only app whose migrations folder is the default
+  function d1App(files: Record<string, string>, wrangler = { name: "my-app", d1_databases: [{ binding: "DB", database_name: "my-app-db", database_id: "x" }] } as Record<string, unknown>) {
+    const dir = tempDir();
+    write(dir, "package.json", "{}");
+    write(dir, "wrangler.jsonc", JSON.stringify(wrangler, null, 2));
+    for (const [path, text] of Object.entries(files)) write(dir, path, text);
+    return cloudflareFindings(dir);
+  }
+
+  it("scans the default migrations folder only when no Hyperdrive binding may own it", () => {
+    const postgres = { "migrations/0001_init.sql": "create table widget (id bigserial primary key, created_at timestamptz default now());\n" };
+    const both = { name: "my-app", hyperdrive: [{ binding: "HYPERDRIVE", id: "a" }], placement: { region: "aws:us-east-1" }, d1_databases: [{ binding: "CACHE", database_name: "my-app-cache", database_id: "x" }] };
+    assert.deepEqual(d1App(postgres, both).filter((f) => f.id.startsWith("cloudflare/d1-postgres")).map(where), []);
+    const named = { ...both, d1_databases: [{ ...both.d1_databases[0], migrations_dir: "migrations" }] };
+    assert.equal(d1App(postgres, named).filter((f) => f.id === "cloudflare/d1-postgres-sql").length, 2);
+    assert.equal(d1App(postgres).filter((f) => f.id === "cloudflare/d1-postgres-sql").length, 2);
+  });
+
+  it("counts a Prisma model's columns without its relation fields", () => {
+    const fields = (n: number) => Array.from({ length: n }, (_, i) => `  field${i} String?`).join("\n");
+    const schema = (n: number) => `datasource db {\n  provider = "sqlite"\n  url      = env("DATABASE_URL")\n}\n\nmodel Shop {\n  id String @id\n  orders ShopifyOrder[]\n}\n\nmodel ShopifyOrder {\n  id String @id\n  shopId String\n  shop Shop @relation(fields: [shopId], references: [id])\n${fields(n)}\n  @@map("shopify_order")\n}\n`;
+    assert.deepEqual(d1App({ "prisma/schema.prisma": schema(98) }).filter((f) => f.id === "cloudflare/d1-columns").map(where), []);
+    const found = d1App({ "prisma/schema.prisma": schema(99) }).filter((f) => f.id === "cloudflare/d1-columns");
+    assert.deepEqual(found.map(where), ["cloudflare/d1-columns prisma/schema.prisma:11"]);
+    assert.equal(found[0].error, "too many columns on shopify_order: SQLITE_ERROR");
+  });
+
+  it("reads exec() and a destructured binding, and ignores comments and other databases", () => {
+    const code = [
+      'import Database from "better-sqlite3";',
+      "export async function run(env: Env) {",
+      "  const { DB: db } = env;",
+      '  new Database("local.db").prepare("BEGIN").run(); // another database: BEGIN TRANSACTION is fine there',
+      '  await db.exec("insert into widget (id) values (1); COMMIT;");',
+      "}",
+    ].join("\n");
+    const found = d1App({ "app/run.server.ts": code });
+    assert.deepEqual(found.filter((f) => f.id === "cloudflare/d1-transaction").map(where), ["cloudflare/d1-transaction app/run.server.ts:5"]);
+    assert.match(found.find((f) => f.id === "cloudflare/d1-transaction")!.message, /COMMIT through a D1 binding's exec\(\).*D1_EXEC_ERROR/);
+  });
+
+  it("reports a pgvector operator in a query sent to D1", () => {
+    const found = d1App({ "app/similar.server.ts": 'export const similar = (db: D1Database, v: string) => db.prepare("select id from product_embedding order by embedding <=> ? limit 5").bind(v).all();\n' });
+    assert.deepEqual(found.filter((f) => f.id === "cloudflare/d1-vector").map((f) => `${where(f)} ${f.error}`), ['cloudflare/d1-vector app/similar.server.ts:1 D1_ERROR: near ">": syntax error']);
+  });
+
+  it("accepts the reference's insertRows helper", () => {
+    assert.deepEqual(d1App({ "app/d1.server.ts": block("cloudflare.md", "app/d1.server.ts") }).map(where), []);
+  });
+});
+
 describe("the files in references/platforms/cloudflare.md", () => {
   it("pass the checks, leaving only what a dashboard or CLI has to show", () => {
     const dir = tempDir();
