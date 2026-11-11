@@ -138,6 +138,8 @@ Traffic tied to those URLs can be staged too, but only by building a forwarding 
 
 The token rule decides the order for each store: a merchant request that the forwarder passes to Gadget can make Gadget run a token exchange, which retires tokens the new app holds. So flip a store's column first, then move its tokens, and never forward a request for a store after its flip. This costs a forwarder that must stay up for the whole move, and two apps to watch for as long as it lasts. Forwarding wasn't run end to end for this skill.
 
+A staged move also has to split the work no request starts. Mark each moved store on its `shopifyShop` record, and have Gadget's scheduled actions, the off switch, and the new cron jobs check that mark for each store. Run the catch-up export for each store after its switch, limited to that store's records, and size the id gap from [schema-mapping.md](schema-mapping.md#move-sequences-after-loading) for every record Gadget creates until the last store moves, which over a few weeks can pass 1,000,000 ([Move one store at a time](https://docs.gadget.dev/guides/moving-to-another-platform#move-one-store-at-a-time)).
+
 Only one app may hold a store's tokens at any time, staged or not.
 
 ## Common pitfalls
