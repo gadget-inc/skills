@@ -29,6 +29,8 @@ The export file holds every user's password hash. Keep it off shared drives and 
 
 Each provider takes the hash in a different field. In all of them, import one user whose password you know, sign in as that user, and only then import the rest.
 
+Run the import once, after writes to Gadget stop, as in the "Cutover without Shopify" section of [non-shopify-apps.md](non-shopify-apps.md#cutover-without-shopify). A second run that only creates users leaves each existing user with the first export's hash and roles, and on Supabase `updateUserById` with a new `password_hash` does not change the password either. If you import early to test, delete those users before the final run. Firebase's `importUsers` is the exception, because it replaces a user whose `uid` exists.
+
 ### Supabase Auth
 
 ```typescript
