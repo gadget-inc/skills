@@ -128,7 +128,7 @@ Moving back is cheap only for stores the new app holds no session for. Step 8 gi
 Shopify sends every store to the same `application_url` and delivers each app-level webhook to one address, so step 6 moves every store's traffic at once. That is the default, and the right choice for most apps. A store-by-store move fits the work that isn't tied to those URLs:
 
 - **Tokens and background work.** After step 6, move tokens for a handful of stores first, watch the new app refresh them and run its jobs for those stores, then move the rest. Stores whose tokens haven't moved get new ones when a merchant opens the new app.
-- **Web apps without Shopify.** Add a column that says which app handles each customer account and route requests on it at your own domain, since no outside party fixes the URL.
+- **Web apps without Shopify.** Add a column that says which app handles each customer account and route requests on it at your own domain, since no outside party fixes the URL. Split the work no request starts per account too, as the last paragraphs of this section describe for stores, including the records that belong to no account.
 
 Traffic tied to those URLs can be staged too, but only by building a forwarding layer. The new app becomes the address for every store in step 6, keeps a column that says which app handles each store, and passes requests for stores that haven't moved on to Gadget. What is known about each kind of request:
 
