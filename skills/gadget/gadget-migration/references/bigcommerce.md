@@ -152,11 +152,12 @@ Models in the `bigcommerce` namespace live in `api/models/bigcommerce/<model>/` 
 
 ## Cutover order
 
-1. Deploy the new app with the same client id and secret, and load the exported stores and custom models.
+1. Deploy the new app with the same client id and secret, load the exported stores and custom models, and move each id sequence with the gap from [schema-mapping.md](schema-mapping.md#move-sequences-after-loading). The new app writes records from step 2 on, and Gadget's records from the catch-up need ids below them.
 2. Register the new app's webhooks for every store. Both apps now receive every event, so make sure the new app's writes to BigCommerce and its emails are off, or the Gadget app's are.
-3. Change the four callback URLs in the Developer Portal. Merchants who open the app now load the new one.
-4. Remove the webhook triggers from the Gadget app's actions and deploy it. Gadget unregisters webhooks that no longer have a trigger. Then list each store's webhooks and delete any that still point at the Gadget URL.
-5. Let Gadget's queued background actions finish, and keep the Gadget app until the records match.
+3. Stop writes in Gadget, turn off its scheduled actions, let its queue drain, and run the catch-up export from [data-export.md](data-export.md#catch-up-on-records-that-change-during-the-export) and load it, as in steps 1 to 3 of the "Cutover without Shopify" section of [non-shopify-apps.md](non-shopify-apps.md#cutover-without-shopify). Without this step, every record Gadget wrote after the first export stays behind. Turn on the new app's cron jobs after the load.
+4. Change the four callback URLs in the Developer Portal. Merchants who open the app now load the new one.
+5. Remove the webhook triggers from the Gadget app's actions and deploy it. Gadget unregisters webhooks that no longer have a trigger. Then list each store's webhooks and delete any that still point at the Gadget URL.
+6. Keep the Gadget app until the records match.
 
 Do not uninstall the app from a store to clean up. BigCommerce deletes that store's webhooks for both apps, and the merchant has to install again.
 
