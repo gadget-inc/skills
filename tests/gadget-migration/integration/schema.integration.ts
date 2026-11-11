@@ -1,5 +1,5 @@
 // Runs the SQL, the Prisma schema, and the loader in references/schema-mapping.md and
-// references/data-export.md against Postgres. See tests/README.md.
+// references/data-export.md, and the read query in references/frontend.md, against Postgres. See tests/README.md.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -287,6 +287,24 @@ describe("data-export.md", { skip }, () => {
       assert.deepEqual((await admin.query(gadgetTime)).rows[0], { name: "second", gadget_time: false });
     } finally {
       await admin.query("drop trigger if exists widget_set_updated_at on widget; drop function if exists set_updated_at()");
+    }
+  });
+});
+
+describe("frontend.md", { skip }, () => {
+  it("returns 6 rows with <> where Gadget's notEquals returned 8, and 8 in Gadget's order with is distinct from", async () => {
+    const client = await admin.connect();
+    try {
+      // a temporary table named widget hides the real one for this connection only
+      await client.query("create temporary table widget (id bigint primary key, status text)");
+      // inserted out of order, so only the order by puts them in id order
+      await client.query("insert into widget values (9, 'active'), (2, null), (7, 'draft'), (4, 'archived'), (1, 'active'), (6, null), (3, 'draft'), (8, 'active'), (5, 'active')");
+      const [plain, ported] = (await client.query(sql("frontend.md", "app/sql/unarchived_widgets.sql"))) as unknown as pg.QueryResult[];
+      assert.equal(plain.rowCount, 6);
+      assert.deepEqual(ported.rows.map((row) => Number(row.id)), [1, 2, 3, 5, 6, 7, 8, 9]);
+    } finally {
+      await client.query("drop table if exists pg_temp.widget");
+      client.release();
     }
   });
 });
