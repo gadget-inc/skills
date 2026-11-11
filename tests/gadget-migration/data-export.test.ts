@@ -2,7 +2,7 @@
 // client (fixtures/fake-gadget-client). Run with: node --test "tests/**/*.test.ts"
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
@@ -71,6 +71,7 @@ describe("the export script in data-export.md", () => {
     const resumed = run(dir, ["widget"], { FAKE_TOTAL: "600" });
     assert.equal(resumed.status, 0, resumed.stderr);
     assert.deepEqual(ids(join(dir, "widget.ndjson")), range(1, 600));
+    assert.equal(existsSync(join(dir, "widget.cursor")), false);
   });
 
   it("repeats one page, and skips none, when a run dies before saving its cursor", () => {
@@ -102,6 +103,23 @@ describe("the export script in data-export.md", () => {
     assert.deepEqual(JSON.parse(lines(join(dir, "calls.log"))[0]).filter, { updatedAt: { greaterThan: "2026-11-01T00:00:00Z" } });
     assert.deepEqual(ids(join(dir, "widget.changes.ndjson")), [1, 2]);
     assert.equal(existsSync(join(dir, "widget.ndjson")), false);
+  });
+
+  it("starts the second catch-up from the first page, because a finished run deletes its checkpoint", () => {
+    const dir = project();
+    const since = "2026-11-01T00:00:00Z";
+    const first = run(dir, ["widget", since], { FAKE_TOTAL: "600" });
+    assert.equal(first.status, 0, first.stderr);
+    assert.equal(existsSync(join(dir, "widget.changes.cursor")), false);
+
+    // the reference says to move the first catch-up's file aside, because each run appends
+    renameSync(join(dir, "widget.changes.ndjson"), join(dir, "widget.changes.first.ndjson"));
+    rmSync(join(dir, "calls.log"));
+    const second = run(dir, ["widget", since], { FAKE_TOTAL: "600" });
+    assert.equal(second.status, 0, second.stderr);
+    // with the checkpoint left behind, this run would resume after id 500 and skip changes to ids 1 to 500
+    assert.equal(JSON.parse(lines(join(dir, "calls.log"))[0]).after, undefined);
+    assert.deepEqual(ids(join(dir, "widget.changes.ndjson")), range(1, 600));
   });
 
   it("fails with the model's name when the model doesn't exist", () => {

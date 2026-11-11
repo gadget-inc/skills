@@ -19,12 +19,12 @@ Run `scripts/inventory.ts` first. Its model table says which models to export, w
 
 The Internal API reads every stored field, including ones the Public API hides, and ignores your roles' permissions and filters. It only accepts system admin callers: create an API key in the **production** environment's **Settings** > **API keys** and turn **Access control** off. Delete the key when the export is done.
 
-This script writes one model to newline-delimited JSON. It waits and retries when a request fails, and a second run continues from the last page the first one finished:
+This script writes one model to newline-delimited JSON. It waits and retries when a request fails, and a run that stops partway continues from the last page it finished when you start it again:
 
 ```typescript
 // in scripts/export-model.ts
 import { Client } from "@gadget-client/my-app";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 // usage: node scripts/export-model.ts widget
 //        node scripts/export-model.ts billing/invoice 2026-11-01T00:00:00Z
@@ -68,6 +68,8 @@ for (;;) {
   writeFileSync(checkpoint, cursor!); // written after the page, so a restart never skips records
 }
 
+// a finished run deletes its checkpoint, so the next run, such as the second catch-up, starts from the first page
+rmSync(checkpoint, { force: true });
 console.log(`exported ${exported} records from ${model}`);
 ```
 
@@ -146,7 +148,7 @@ export async function loadNdjson(pool: Pool, file: string, table: string): Promi
 The export is not a snapshot. It reads pages over minutes or hours while your app keeps writing, so a record that changes after its page was read is stale in the file. Three steps close the gap:
 
 1. **Note the time before the first export starts.**
-2. **Export changes after traffic stops.** Pass that time as the second argument, and the script writes only records with a newer `updatedAt` to `widget.changes.ndjson`. Load it with the same upsert. Run it once before cutover to shrink the gap and once after writes to Gadget stop.
+2. **Export changes after traffic stops.** Pass that time as the second argument, and the script writes only records with a newer `updatedAt` to `widget.changes.ndjson`. Load it with the same upsert. Run it once before cutover to shrink the gap and once after writes to Gadget stop. Each run appends to `widget.changes.ndjson`, so move the previous file aside before the second run.
 3. **Remove deleted records.** A deleted record is gone from Gadget, so no export mentions it. Export the ids again with `select: ["id"]` and delete rows in your table whose id is missing. Delete only after that id export reached its last page, where `hasNextPage` is false. A run that stopped at 1.8 million of 2.4 million ids lists 600,000 live records as missing, and the delete removes all of them.
 
 Gadget sets `updatedAt` on every save, through an action or the Internal API, unless your code writes `updatedAt` itself. The upsert above compares Gadget's `updatedAt`, so keep that value in your table and don't replace it with the time you loaded the row.
