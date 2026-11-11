@@ -143,7 +143,7 @@ export const options: ActionOptions = {
 becomes a cron job with the schedule `0 2 * * *` that calls the same function. Gadget's scheduler made three promises, and not every replacement keeps them:
 
 - **At most once a minute, starting within 10 seconds of the scheduled time.** Railway cron jobs must be at least 5 minutes apart. Vercel Schedules, in beta, run at most every 15 minutes on the Hobby plan and start each run at some point in a 15-minute window after the scheduled time. On Pro the window is 1 minute by default.
-- **No overlapping runs.** Gadget skipped a run while the previous one was still going. Railway skips too, and Render delays the next run until the current one finishes. Vercel can start overlapping runs, and Vercel and Cloud Scheduler can deliver the same run twice.
+- **No overlapping runs.** Gadget skipped a run while the previous one was still going. Railway skips too, and Render delays the next run until the current one finishes. Vercel can start overlapping runs, and Vercel and Cloud Scheduler can deliver the same run twice. Those hosts protect only the cron command, so once it only adds a job to your queue, two jobs can run at once on a worker whose concurrency is above 1.
 - **Retries.** Gadget retried a failed run, up to 5 attempts. Vercel doesn't retry a run that targets a function or a path. Cloud Scheduler doesn't retry unless you set a retry count on the job, which is 0 by default. Render's and Railway's documentation promise no retry. Without one, a failed nightly job waits a whole day.
 
 For retries, keep the cron job small: have it add one job to your queue, and let the queue's retries do the rest. With BullMQ you can drop the host's cron and let the queue schedule the job. `upsertJobScheduler` is safe to call from every process at boot, because a second call with the same id replaces the schedule instead of adding another:
@@ -157,7 +157,7 @@ await maintenanceQueue.upsertJobScheduler(
 );
 ```
 
-Where runs can overlap or repeat, take a transaction-level advisory lock at the start and exit when another run holds it:
+In the job the queue runs, on every host, take a transaction-level advisory lock at the start and exit when another run holds it. Without a queue, put the same lock in the cron job wherever the host can overlap or repeat runs:
 
 ```typescript
 // in app/cron/pruneAuditLogs.server.ts
@@ -203,7 +203,7 @@ Let Gadget finish the background actions already queued, and watch the Queues da
 - **No `attempts` in BullMQ.** The first error fails the job for good.
 - **One shared concurrency limit.** Every store waits behind the busiest one, and a backfill for one store blocks webhook work for all of them.
 - **Jobs that can't run twice.** Every queue retries. Increments and "send email" steps need an idempotency key.
-- **Assuming the scheduler skips overlaps or retries.** Check the host's rules, and add the lock.
+- **Assuming the scheduler skips overlaps or retries.** Check the host's rules, and put the lock in the job that does the work. Once the cron job only adds a job to your queue, that is the queued job, whatever the host promises about the cron command.
 - **Queuing inside the database transaction.** A rollback doesn't take the job back, and the worker can pick the job up before the commit and not find the row.
 - **A host timeout shorter than the job.** The job fails at the same point on every retry. Check the host's request timeout as well as the queue's.
 - **A priority on some jobs only.** In BullMQ the jobs with no priority run first.
