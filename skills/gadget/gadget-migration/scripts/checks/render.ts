@@ -61,7 +61,8 @@ function startCommand(repo: Repo, r: Resource): { command: string; key?: string 
   return null;
 }
 
-function prismaUrls(repo: Repo): { url?: string; directUrl?: string } {
+// The variables the Prisma datasource reads its url and directUrl from.
+export function prismaUrls(repo: Repo): { url?: string; directUrl?: string } {
   const path = repo.find(/(^|\/)schema\.prisma$/)[0];
   const schema = path ? (repo.read(path) ?? "") : "";
   const datasource = schema.match(/datasource\s+\w+\s*\{([^}]*)\}/)?.[1] ?? "";

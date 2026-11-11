@@ -7,7 +7,7 @@ SECRETS="DATABASE_URL=database-url:latest"
 gcloud builds submit --tag="$IMAGE"
 
 gcloud run jobs deploy my-app-migrate --image="$IMAGE" --region="$REGION" \
-  --command=npx --args=prisma,migrate,deploy --execute-now
+  --command=npx --args=prisma,migrate,deploy --set-secrets="$SECRETS" --execute-now
 
 gcloud run deploy my-app-worker --image="$IMAGE" --region="$REGION" \
   --no-allow-unauthenticated \

@@ -58,6 +58,8 @@ describe("Trigger.dev checks", () => {
       "trigger-dev/sdk-version app/trigger/notify-external-system.ts:20",
       "trigger-dev/sdk-version app/trigger/notify-external-system.ts:28",
       "trigger-dev/sdk-version app/trigger/notify-external-system.ts:7",
+      "trigger-dev/shopify-from-tasks app/trigger/sync-products.ts:7",
+      "trigger-dev/shopify-from-tasks app/trigger/tag-order.ts:2",
       "trigger-dev/trigger-in-transaction app/services/orders.server.ts:8",
       "trigger-dev/ttl-shorter-than-delay app/services/orders.server.ts:22",
       "trigger-dev/version-mismatch package.json:10",
@@ -67,6 +69,9 @@ describe("Trigger.dev checks", () => {
     assert.match(env.message, /Your tasks read EXTERNAL_API_TOKEN\./);
     const latest = own(findings).find((f) => f.id === "trigger-dev/cli-latest")!;
     assert.equal(latest.error, "ERROR: Version mismatch detected while running in CI. This won't end well. Aborting.");
+    const shopify = own(findings).filter((f) => f.id === "trigger-dev/shopify-from-tasks");
+    assert.ok(shopify.every((f) => f.severity === "manual" && f.error === "403"));
+    assert.match(shopify.find((f) => f.file === "app/trigger/tag-order.ts")!.message, /through app\/services\/shopify-orders\.server\.ts\./);
     for (const f of own(findings)) {
       assert.ok(f.fix.endsWith("."), `${f.id} fix ends with a period`);
       assert.match(f.docs ?? "", /^https:\/\/docs\.gadget\.dev\/guides\/moving-to-another-platform\/trigger-dev#/);
@@ -111,6 +116,24 @@ describe("Trigger.dev checks", () => {
     // a CI workflow that installs the latest CLI and deploys with it
     const workflow = "jobs:\n  deploy:\n    steps:\n      - run: npm install -g trigger.dev@latest\n      - run: trigger.dev deploy\n";
     assert.deepEqual(latest({}, { ".github/workflows/trigger.yml": workflow }), ["error .github/workflows/trigger.yml:4"]);
+  });
+
+  it("reports a task file that calls Shopify once, and not for a mention in a comment or a string, or a type-only import", () => {
+    const shopify = (files: Record<string, string>) => ids(variant(() => {}, files), "trigger-dev/shopify-from-tasks").map((f) => `${f.file}:${f.line}`);
+    const task = (body: string, header = "") => `import { task } from "@trigger.dev/sdk";\n${header}export const t = task({\n  id: "t",\n  run: async () => {\n${body}\n  },\n});\n`;
+    // a comment, a log line, and a type-only import
+    const quiet = task('    // not admin.graphql(), and no X-Shopify-Access-Token\n    console.log("skipping unauthenticated.admin() here");', 'import type { Session } from "@shopify/shopify-api";\n');
+    assert.deepEqual(shopify({ "app/trigger/quiet.ts": quiet }), []);
+    // the package import is the first call, and a file outside dirs counts when it defines a task
+    const client = task("    const client = new shopify.clients.Graphql({ session });\n    await client.request(query);", 'import { shopifyApi } from "@shopify/shopify-api";\n');
+    assert.deepEqual(shopify({ "app/jobs/sync.ts": client }), ["app/jobs/sync.ts:2"]);
+    // a call two imports away isn't followed
+    const twoDeep = {
+      "app/trigger/report.ts": task("    await report();", 'import { report } from "../services/report.server";\n'),
+      "app/services/report.server.ts": 'import { tag } from "./shopify.server";\nexport const report = () => tag();\n',
+      "app/services/shopify.server.ts": "export const tag = async () => (await unauthenticated.admin(shop)).admin.graphql(query);\n",
+    };
+    assert.deepEqual(shopify(twoDeep), []);
   });
 
   it("passes the complete examples in references/platforms/trigger-dev.md, apart from the onFailure reminder", () => {

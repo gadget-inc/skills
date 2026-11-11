@@ -3,6 +3,7 @@ import { DOCS, type CheckModule, type Finding, type Repo } from "./types.ts";
 import { dockerCommand, keyLine, lineAt, lineOf, parseDockerfile, parseYaml } from "./read-config.ts";
 import { dockerfileCmd, expandScripts, startOverrideFindings } from "./common.ts";
 import { arithmetic } from "./railway.ts";
+import { prismaUrls } from "./render.ts";
 
 const GUIDE = `${DOCS}/google-cloud-run`;
 const REF = "references/platforms/google-cloud-run.md";
@@ -168,14 +169,31 @@ function durationSeconds(value: string | undefined): number | undefined {
 }
 
 // KEY=value lists from --set-env-vars and --set-secrets, including gcloud's ^DELIM^ form
-function keyList(value: string): string[] {
+function keyPairs(value: string): [string, string][] {
   let delimiter = ",";
   const custom = value.match(/^\^(.+?)\^/);
   if (custom) {
     delimiter = custom[1];
     value = value.slice(custom[0].length);
   }
-  return value.split(delimiter).map((pair) => pair.split("=")[0].trim()).filter(Boolean);
+  return value.split(delimiter).map((pair): [string, string] => [pair.split("=")[0].trim(), pair.slice(pair.indexOf("=") + 1).trim()]).filter(([key]) => key);
+}
+
+function keyList(value: string): string[] {
+  return keyPairs(value).map(([key]) => key);
+}
+
+// The secret a command sets an environment variable from, such as "database-url" for
+// DATABASE_URL=database-url:1, or null when it doesn't set it or the list is a variable the script
+// doesn't assign.
+function secretFor(c: Gcloud, name: string): string | null {
+  for (const value of [...(c.flags.get("set-secrets") ?? []), ...(c.flags.get("update-secrets") ?? [])].reverse()) {
+    if (value.includes("$")) continue;
+    const ref = keyPairs(value).find(([key]) => key === name)?.[1];
+    // "database-url:1" or "projects/123456789/secrets/database-url:1"
+    if (ref) return ref.replace(/:[^:/]*$/, "").split("/").pop()!;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -545,6 +563,63 @@ function migrateJobFindings(repo: Repo, commands: Gcloud[], findings: Finding[])
   }
 }
 
+const MIGRATION_COMMAND = /migrat|\bdb[\s,:]push\b/;
+const sqlTable = (raw: string) => raw.replace(/"/g, "").split(".").pop()!.toLowerCase();
+
+// Row-level security that never runs: the services read their database URL from the secret the
+// migration job uses, so they connect as the user that owns the tables, and Postgres skips the
+// policies for a table's owner.
+function ownerFindings(repo: Repo, commands: Gcloud[], findings: Finding[]) {
+  const protectedTables: { file: string; table: string }[] = [];
+  const forced = new Set<string>();
+  for (const file of repo.find(/\.sql$/)) {
+    // comments blanked, so a commented-out statement doesn't count
+    const sql = (repo.read(file) ?? "").replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "));
+    for (const m of sql.matchAll(/alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?([\w."]+)\s+force\s+row\s+level\s+security/gi)) forced.add(sqlTable(m[1]));
+    for (const m of sql.matchAll(/alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?([\w."]+)\s+enable\s+row\s+level\s+security|create\s+policy\s+(?:"[^"]+"|[\w$]+)\s+on\s+(?:only\s+)?([\w."]+)/gi)) {
+      protectedTables.push({ file, table: sqlTable(m[1] ?? m[2]) });
+    }
+  }
+  const unforced = protectedTables.filter((t) => !forced.has(t.table));
+  if (!unforced.length) return;
+  // Prisma Migrate connects with directUrl when the schema has one
+  const { url, directUrl } = prismaUrls(repo);
+  const appVar = url ?? "DATABASE_URL";
+  const migrationVar = directUrl ?? appVar;
+  const jobs = commands.filter((c) => isCmd(c, "run", "jobs") && ["deploy", "create", "update"].includes(c.positional[2]) && MIGRATION_COMMAND.test([flag(c, "command") ?? "", ...(c.flags.get("args") ?? [])].join(" ")));
+  for (const job of jobs) {
+    const secret = secretFor(job, migrationVar);
+    const service = secret && commands.find((c) => isCmd(c, "run", "deploy") && secretFor(c, appVar) === secret);
+    if (!service) continue;
+    const tables = [...new Set(unforced.map((t) => t.table))];
+    findings.push({
+      id: "google-cloud-run/owner-skips-rls",
+      severity: "error",
+      file: job.file,
+      line: job.line,
+      message: `The migration job ${job.positional[3]} reads ${migrationVar} from the secret ${secret}, and ${serviceName(service)} reads ${appVar} from the same secret, so the services connect as the user that runs migrations and owns the tables. Postgres skips row-level security for a table's owner, so the policies on ${tables.join(", ")} (${unforced[0].file}) never apply to them.`,
+      error: "a query with no store set returns every store's rows",
+      fix: `Give ${job.positional[3]} a second secret, such as migrate-database-url, with the postgres URL, and put the URL of an app role you create with SQL in ${secret}, as the guide's section shows. Then check once as that role that a query without app.shop_id set fails with unrecognized configuration parameter "app.shop_id", or run scripts/db-check.sql as it.`,
+      docs: `${GUIDE}#rewrite-permissions-and-shop-tenancy`,
+    });
+  }
+}
+
+function sqlUserFindings(commands: Gcloud[], findings: Finding[]) {
+  // IAM database users (--type=cloud_iam_user and the like) aren't what the guide describes
+  for (const c of commands.filter((c) => isCmd(c, "sql", "users", "create") && /^(built_in)?$/i.test(flag(c, "type") ?? ""))) {
+    findings.push({
+      id: "google-cloud-run/sql-user-create",
+      severity: "warning",
+      file: c.file,
+      line: c.line,
+      message: `This creates ${c.positional[3] ?? "a database user"} with gcloud sql users create. By default, Cloud SQL gives each user it creates the CREATEROLE and CREATEDB attributes and adds it to cloudsqlsuperuser, and the app's role needs neither.`,
+      fix: "Create the app's role with SQL as postgres, with create role, the grants, and alter default privileges as the guide's section shows, and remove this command.",
+      docs: `${GUIDE}#rewrite-permissions-and-shop-tenancy`,
+    });
+  }
+}
+
 export const googleCloudRun: CheckModule = {
   platform: "google-cloud-run",
   title: "Google Cloud Run",
@@ -570,6 +645,8 @@ export const googleCloudRun: CheckModule = {
     scalingFindings(commands, findings);
     taskRouteFindings(repo, findings);
     migrateJobFindings(repo, commands, findings);
+    ownerFindings(repo, commands, findings);
+    sqlUserFindings(commands, findings);
     return findings;
   },
 };

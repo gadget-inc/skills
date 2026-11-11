@@ -44,12 +44,15 @@ describe("Google Cloud Run checks", () => {
       "google-cloud-run/instance-limits scripts/deploy.sh:17",
       "google-cloud-run/migrate-before-deploy scripts/deploy.sh:9",
       "google-cloud-run/migrate-on-start start.sh:3",
+      "google-cloud-run/owner-skips-rls scripts/deploy.sh:9",
       "google-cloud-run/prisma-generate Dockerfile:9",
       "google-cloud-run/pubsub-expiration scripts/deploy.sh:21",
       "google-cloud-run/secret-latest scripts/deploy.sh:12",
       "google-cloud-run/secret-latest scripts/deploy.sh:17",
+      "google-cloud-run/secret-latest scripts/deploy.sh:9",
       "google-cloud-run/shopify-env-missing scripts/deploy.sh:12",
       "google-cloud-run/shopify-env-missing scripts/deploy.sh:17",
+      "google-cloud-run/sql-user-create scripts/gcp-iam.sh:9",
       "google-cloud-run/task-route-public app/routes/tasks.webhook.tsx:4",
       "google-cloud-run/timeout-deadline scripts/deploy.sh:12",
     ]);
@@ -59,6 +62,9 @@ describe("Google Cloud Run checks", () => {
     assert.match(byId("google-cloud-run/shopify-env-missing")[0].message, /SHOPIFY_APP_URL, SHOPIFY_API_SECRET/);
     assert.equal(byId("google-cloud-run/migrate-before-deploy")[0].severity, "error");
     assert.equal(byId("google-cloud-run/instance-limits")[0].severity, "manual");
+    assert.equal(byId("google-cloud-run/owner-skips-rls")[0].severity, "error");
+    assert.match(byId("google-cloud-run/owner-skips-rls")[0].message, /secret database-url, and my-app-worker reads DATABASE_URL from the same secret.*policies on audit_log/);
+    assert.equal(byId("google-cloud-run/sql-user-create")[0].severity, "warning");
     assert.deepEqual(byId("google-cloud-run/iam-roles").map((f) => f.message.match(/roles\/[\w.]+/)![0]).sort(), [
       "roles/cloudsql.client",
       "roles/cloudtasks.queueAdmin",
@@ -158,9 +164,29 @@ describe("Google Cloud Run checks", () => {
     );
   });
 
+  it("skips row-level security that the owner can't skip, and IAM database users", () => {
+    const rls = 'ALTER TABLE "audit_log" ENABLE ROW LEVEL SECURITY;\n';
+    const deploy = 'S="DATABASE_URL=database-url:1"\ngcloud run jobs deploy my-app-migrate --image=x --command=npx --args=prisma,migrate,deploy --set-secrets="$S" --execute-now --wait\ngcloud run deploy my-app-web --image=x --set-secrets="$S"\ngcloud sql users create my-app-web@my-app-production.iam --instance=my-app-db --type=cloud_iam_service_account\n';
+    const ids = (files: Record<string, string>) => {
+      let out: string[] = [];
+      withApp(files, (dir) => (out = where(own(preflight(dir, ["google-cloud-run"]).findings).filter((f) => /owner-skips-rls|sql-user-create/.test(f.id)))));
+      return out;
+    };
+    assert.deepEqual(ids({ "scripts/deploy.sh": deploy, "migrations/1.sql": rls }), ["google-cloud-run/owner-skips-rls scripts/deploy.sh:2"]);
+    // forced for the owner too, or only in a comment
+    assert.deepEqual(ids({ "scripts/deploy.sh": deploy, "migrations/1.sql": `${rls}ALTER TABLE "audit_log" FORCE ROW LEVEL SECURITY;\n` }), []);
+    assert.deepEqual(ids({ "scripts/deploy.sh": deploy, "migrations/1.sql": `-- ${rls}` }), []);
+    // Prisma Migrate connects with directUrl, which reads another secret here
+    const schema = 'datasource db {\n  provider = "postgresql"\n  url = env("DATABASE_URL")\n  directUrl = env("DIRECT_DATABASE_URL")\n}\n';
+    const direct = deploy.replace("--set-secrets=\"$S\" --execute-now", '--set-secrets="$S,DIRECT_DATABASE_URL=migrate-database-url:1" --execute-now');
+    assert.deepEqual(ids({ "scripts/deploy.sh": direct, "migrations/1.sql": rls, "prisma/schema.prisma": schema }), []);
+  });
+
   it("passes the complete examples in google-cloud-run.md", () => {
     const files: Record<string, string> = {};
     for (const b of platformBlocks("google-cloud-run.md")) files[b.path] = b.code;
+    // row-level security, which the example's two secrets keep in force for the services
+    files["prisma/migrations/2_shop_isolation/migration.sql"] = 'ALTER TABLE "audit_log" ENABLE ROW LEVEL SECURITY;\n';
     files["app/shopify.server.ts"] = shopifyServer;
     files["package.json"] = JSON.stringify({ dependencies: { "@google-cloud/tasks": "7.3.1", "@google-cloud/storage": "8.4.0", "@prisma/client": "6.19.3", prisma: "6.19.3" } });
     withApp(files, (dir) => assert.deepEqual(where(own(preflight(dir, ["google-cloud-run"]).findings)), []));

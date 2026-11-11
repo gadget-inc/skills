@@ -1,7 +1,7 @@
 // Checks for apps moving to Trigger.dev. references/platforms/trigger-dev.md explains each one.
 import { DOCS, type CheckModule, type Finding, type Repo } from "./types.ts";
 import { lineAt, lineOf } from "./read-config.ts";
-import { calls, closing, props, transactionSpans, type Call, type Prop } from "./source-scan.ts";
+import { calls, closing, mask, props, transactionSpans, type Call, type Prop } from "./source-scan.ts";
 
 const GUIDE = `${DOCS}/trigger-dev`;
 const CONFIG = "trigger.config.ts";
@@ -297,9 +297,22 @@ function namedLimitFindings(repo: Repo, tasks: TaskDef[]): Finding[] {
   return findings;
 }
 
+// The directories trigger.config.ts lists in dirs, without "./" or a trailing slash.
+function configDirs(config: string | null): string[] {
+  return config ? [...(config.match(/dirs\s*:\s*\[([^\]]*)\]/)?.[1] ?? "").matchAll(/["'`]\.?\/?([^"'`]+?)\/?["'`]/g)].map((m) => m[1]) : [];
+}
+
+const RELATIVE_IMPORT = /(?:import|export)\s+(?!type\b)[^;]*?from\s+["'](\.{1,2}\/[^"']+)["']/g;
+
+// The repo file a relative import names, or null when it isn't in the repo.
+function resolveRelative(repo: Repo, from: string, specifier: string): string | null {
+  const base = new URL(specifier, `file:///${from}`).pathname.slice(1).replace(/\.(js|mjs)$/, "");
+  return [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}/index.ts`].find((c) => repo.exists(c)) ?? null;
+}
+
 // Files the tasks run: everything under the config's dirs, and the files they import, a few levels deep.
 function taskFiles(repo: Repo, config: string | null): string[] {
-  const dirs = config ? [...(config.match(/dirs\s*:\s*\[([^\]]*)\]/)?.[1] ?? "").matchAll(/["'`]\.?\/?([^"'`]+?)\/?["'`]/g)].map((m) => m[1]) : [];
+  const dirs = configDirs(config);
   const roots = repo.sourceFiles().filter((f) => (dirs.length ? dirs.some((d) => f.startsWith(`${d}/`)) : /(^|\/)trigger\//.test(f)));
   const seen = new Set<string>();
   const queue = roots.map((f) => ({ file: f, depth: 0 }));
@@ -309,13 +322,57 @@ function taskFiles(repo: Repo, config: string | null): string[] {
     seen.add(file);
     if (depth >= 3) continue;
     const text = repo.read(file) ?? "";
-    for (const m of text.matchAll(/(?:import|export)\s+(?!type\b)[^;]*?from\s+["'](\.{1,2}\/[^"']+)["']/g)) {
-      const base = new URL(m[1], `file:///${file}`).pathname.slice(1).replace(/\.(js|mjs)$/, "");
-      const found = [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}/index.ts`].find((c) => repo.exists(c));
+    for (const m of text.matchAll(RELATIVE_IMPORT)) {
+      const found = resolveRelative(repo, file, m[1]);
       if (found) queue.push({ file: found, depth: depth + 1 });
     }
   }
   return [...seen];
+}
+
+// Calls to the Shopify Admin API. SHOPIFY_CALL runs on the text with comments and strings blanked;
+// SHOPIFY_STRING and SHOPIFY_IMPORT run with only comments blanked, since a URL, a header, and a
+// package name are strings.
+const SHOPIFY_CALL = /\badmin\.(?:graphql\s*\(|rest\.)|\bunauthenticated\.admin\s*\(|\bshopify\.clients\.(?:Graphql|Rest)\b|\bnew\s+GraphqlClient\b|\bcreateAdmin(?:Rest)?ApiClient\s*\(/;
+const SHOPIFY_STRING = /\.myshopify\.com\/admin\/api\b|\/admin\/api\/(?:20\d\d-\d\d|unstable|\$\{)|x-shopify-access-token/i;
+const SHOPIFY_IMPORT = /(?<![\w$.])(?:import\s+(?!type\b)[^;"'`]*?from\s*|import\s*\(\s*|require\s*\(\s*|import\s+)["'](?:@shopify\/shopify-api|@shopify\/admin-api-client|shopify-api-node)(?:\/[^"']*)?["']/;
+
+// The index of the file's first call to the Shopify Admin API, or null.
+function shopifyCallIndex(text: string): number | null {
+  const noComments = mask(text, false);
+  const hits = [SHOPIFY_CALL.exec(mask(text))?.index, SHOPIFY_STRING.exec(noComments)?.index, SHOPIFY_IMPORT.exec(noComments)?.index].filter((i): i is number => i !== undefined);
+  return hits.length ? Math.min(...hits) : null;
+}
+
+// Task files that call Shopify, directly or through a module they import. The IP allowlist lives in
+// Shopify's dashboard, so the script can only say which files to look at.
+function shopifyFromTaskFindings(repo: Repo, tasks: TaskDef[]): Finding[] {
+  const findings: Finding[] = [];
+  const dirs = configDirs(repo.read(CONFIG));
+  const roots = new Set([...repo.sourceFiles().filter((f) => dirs.some((d) => f.startsWith(`${d}/`))), ...tasks.map((t) => t.file)]);
+  for (const file of [...roots].sort()) {
+    const text = repo.read(file) ?? "";
+    const hits: { index: number; via?: string }[] = [];
+    const direct = shopifyCallIndex(text);
+    if (direct !== null) hits.push({ index: direct });
+    for (const m of mask(text, false).matchAll(RELATIVE_IMPORT)) {
+      const imported = resolveRelative(repo, file, m[1]);
+      if (imported && shopifyCallIndex(repo.read(imported) ?? "") !== null) hits.push({ index: m.index!, via: imported });
+    }
+    if (!hits.length) continue;
+    const first = hits.reduce((a, b) => (b.index < a.index ? b : a));
+    findings.push({
+      id: "trigger-dev/shopify-from-tasks",
+      severity: "manual",
+      file,
+      line: lineAt(text, first.index),
+      message: `This task file calls the Shopify Admin API${first.via ? ` through ${first.via}` : ""}. Tasks run on Trigger.dev's machines, so the ASN you add to Shopify's IP allowlist for your host doesn't cover these calls, and Shopify answers them with 403 once the allowlist is enforced.`,
+      error: "403",
+      fix: 'Look up the addresses on the Trigger.dev dashboard\'s Regions page, find their ASN and country with whois -h whois.cymru.com " -v <address>", and add both to the allowlist next to your host\'s before you turn on enforcement. Run Shopify\'s allowlist test again after the tasks make their first calls.',
+      docs: `${GUIDE}#call-shopify-from-your-tasks`,
+    });
+  }
+  return findings;
 }
 
 // CLI commands that don't stop on a version mismatch, so trigger.dev@latest is fine for them
@@ -526,6 +583,6 @@ export const triggerDev: CheckModule = {
   run: (repo) => {
     const tasks = tasksIn(repo);
     const triggers = triggersIn(repo, tasks);
-    return [...configFindings(repo, tasks), ...triggerFindings(tasks, triggers), ...transactionFindings(repo, tasks), ...taskFindings(tasks), ...namedLimitFindings(repo, tasks)];
+    return [...configFindings(repo, tasks), ...triggerFindings(tasks, triggers), ...transactionFindings(repo, tasks), ...taskFindings(tasks), ...namedLimitFindings(repo, tasks), ...shopifyFromTaskFindings(repo, tasks)];
   },
 };

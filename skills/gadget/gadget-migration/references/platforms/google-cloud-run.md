@@ -28,6 +28,8 @@ It reads `gcloud` commands in shell scripts, CI workflows, and `cloudbuild.yaml`
 | `google-cloud-run/task-route-public` | A `tasks.*`, `schedules.*`, or `pubsub.*` route with no `K_SERVICE` check, which the public service also serves | |
 | `google-cloud-run/delete-queue` | `deleteQueue`, which blocks the name for 3 days | |
 | `google-cloud-run/pubsub-expiration` | A subscription without `--expiration-period`, deleted after 31 quiet days | `gcloud pubsub subscriptions describe shopify-webhooks-worker --format="yaml(expirationPolicy)"` |
+| `google-cloud-run/owner-skips-rls` | SQL migrations that turn on row-level security, while the migration job and a service read `DATABASE_URL` from the same secret, so the services connect as the tables' owner | `psql "host=127.0.0.1 dbname=my-app user=app_user" -f path/to/skills/gadget-migration/scripts/db-check.sql` through the Cloud SQL Auth Proxy |
+| `google-cloud-run/sql-user-create` | `gcloud sql users create`, which gives the user `CREATEROLE` and `CREATEDB` and adds it to `cloudsqlsuperuser` | |
 | `google-cloud-run/instance-limits` | A public service deployed without `--min` or `--max` | `gcloud run services describe my-app-web --region=us-central1 --format=yaml` shows the `minScale` and `maxScale` annotations |
 | Traffic pinned by a rollback | The newest revision gets no traffic | `gcloud run services describe my-app-web --region=us-central1 --format="yaml(status.traffic)"` should show `latestRevision: true` at `percent: 100` |
 
@@ -42,6 +44,7 @@ It reads `gcloud` commands in shell scripts, CI workflows, and `cloudbuild.yaml`
 | `SigningError: Permission 'iam.serviceAccounts.signBlob' denied on resource (or it may not exist).` | Signing a URL on Cloud Run goes through IAM, and the account can't sign as itself | Token Creator on its own account ([Search, files, and other services](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#search-files-and-other-services)) |
 | `createTask` fails with code `5` (`NOT_FOUND`) for one store | That store's queue was never created, such as for a store installed under Gadget, or it is reactivating after 30 idle days | `enqueueForShop` below creates it and retries ([Limit concurrency per store](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#limit-concurrency-per-store)) |
 | The fix you deployed after a rollback never gets traffic | `update-traffic --to-revisions` pinned traffic | `gcloud run services update-traffic my-app-web --to-latest --region=us-central1` |
+| A query with no store set returns every store's rows, and `scripts/db-check.sql` as the app's role reports `owns tables with row-level security` | The services read the migration job's secret, so they connect as the user that ran migrations and owns the tables | A second secret, `migrate-database-url`, for the migration job, and the URL of an app role you create with SQL in `database-url` (`google-cloud-run/owner-skips-rls`, [Rewrite permissions and shop tenancy](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#rewrite-permissions-and-shop-tenancy)) |
 | A webhook answered `200` but its order was never saved | Work after the response gets no CPU with request-based billing | Create the task before responding ([Receive webhooks](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#receive-webhooks)) |
 
 ## Complete examples
@@ -68,7 +71,7 @@ grant_on_account() { gcloud iam service-accounts add-iam-policy-binding "$1" --p
 for name in my-app-web my-app-worker tasks-invoker scheduler pubsub-invoker; do
   gcloud iam service-accounts describe "$(sa "$name")" --project="$PROJECT" >/dev/null 2>&1 || gcloud iam service-accounts create "$name" --project="$PROJECT"
 done
-for secret in database-url shopify-api-secret; do
+for secret in database-url migrate-database-url shopify-api-secret; do
   gcloud secrets describe "$secret" --project="$PROJECT" >/dev/null 2>&1 || gcloud secrets create "$secret" --project="$PROJECT"
 done
 gcloud storage buckets describe "$BUCKET" >/dev/null 2>&1 || gcloud storage buckets create "$BUCKET" --project="$PROJECT" --location="$REGION"
@@ -84,6 +87,9 @@ for name in my-app-web my-app-worker; do
   gcloud storage buckets add-iam-policy-binding "$BUCKET" --member="serviceAccount:$(sa "$name")" --role=roles/storage.objectViewer >/dev/null   # signed reads
   gcloud storage buckets add-iam-policy-binding "$BUCKET" --member="serviceAccount:$(sa "$name")" --role=roles/storage.objectCreator >/dev/null  # signed uploads
 done
+
+# the migration job runs as my-app-worker and reads postgres's URL; the services read app_user's from database-url
+gcloud secrets add-iam-policy-binding migrate-database-url --project="$PROJECT" --member="serviceAccount:$(sa my-app-worker)" --role=roles/secretmanager.secretAccessor --quiet >/dev/null
 
 # Cloud Tasks itself makes the OIDC token as tasks-invoker
 grant_on_account "$(sa tasks-invoker)" "service-${NUMBER}@gcp-sa-cloudtasks.iam.gserviceaccount.com" roles/iam.serviceAccountUser
@@ -119,6 +125,8 @@ FILES_BUCKET: my-app-production-files
 
 `staging.env.yaml` has the same keys with staging's values.
 
+The IAM script creates the secrets but not the app's database role. Create `app_user` with SQL as [Rewrite permissions and shop tenancy](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#rewrite-permissions-and-shop-tenancy) shows, then put its URL in `database-url` and the `postgres` URL in `migrate-database-url`.
+
 The deploy, with the guide's order (one image, migrations once, worker before web) and the two traffic commands that undo a pinned rollback:
 
 ```bash
@@ -130,8 +138,11 @@ PROJECT="my-app-${ENV}"
 REGION=us-central1
 SQL="${PROJECT}:${REGION}:my-app-db"
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/my-app/server:$(git rev-parse --short HEAD)"
-# every secret a service reads, pinned; --set-secrets replaces the service's whole list
+# every secret a service reads, pinned; --set-secrets replaces the service's whole list.
+# database-url is app_user's URL, so row-level security applies to the services and every other job, such as the backfill
 SECRETS="DATABASE_URL=database-url:1,SHOPIFY_API_SECRET=shopify-api-secret:1"
+# postgres's URL, for the migration job only: it owns the tables it creates, and Postgres skips row-level security for a table's owner
+MIGRATE_SECRETS="DATABASE_URL=migrate-database-url:1"
 
 gcloud builds submit --project="$PROJECT" --tag="$IMAGE"
 
@@ -140,7 +151,7 @@ gcloud builds submit --project="$PROJECT" --tag="$IMAGE"
 gcloud run jobs deploy my-app-migrate --project="$PROJECT" --region="$REGION" --image="$IMAGE" \
   --command=npx --args=prisma,migrate,deploy \
   --service-account="my-app-worker@${PROJECT}.iam.gserviceaccount.com" \
-  --set-cloudsql-instances="$SQL" --set-secrets="$SECRETS" \
+  --set-cloudsql-instances="$SQL" --set-secrets="$MIGRATE_SECRETS" \
   --max-retries=0 --task-timeout=1h --wait
 
 # the worker first, so it has every task route before the web creates tasks; --timeout matches enqueue's deadline
@@ -302,6 +313,7 @@ The order in [cutover.md](../cutover.md) and the guide's [cutover section](https
 
 - **Scheduler jobs run as soon as they exist.** Create them paused (`gcloud scheduler jobs create http ...` then `gcloud scheduler jobs pause prune-audit-logs --location=us-central1`) and resume them in the "Move scheduled work" step.
 - **Per-store queues for existing stores.** Run `scripts/create-shop-queues.ts` before the switch, and again after the catch-up load, for stores that installed in between. `enqueueForShop` covers a store missed after that. A project has [1,000 queues per region](https://docs.cloud.google.com/tasks/docs/quotas) by default, so an app on more stores than that asks for a quota increase first.
+- **Load records as `postgres`.** Run the load script with the user and password from `migrate-database-url`, through the Cloud SQL Auth Proxy, because it writes every store's rows without setting `app.shop_id` ([Rewrite permissions and shop tenancy](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#rewrite-permissions-and-shop-tenancy)).
 - **Deploys don't cut off jobs.** Requests in progress finish on the old revision. An instance stopped for other reasons gets 10 seconds after `SIGTERM`, so the task's retry is what saves the job.
 - **Rollback:** `gcloud run services update-traffic my-app-web --to-revisions=<revision>=100`, then the next `scripts/deploy.sh` moves traffic back to the latest. It doesn't undo migrations.
 

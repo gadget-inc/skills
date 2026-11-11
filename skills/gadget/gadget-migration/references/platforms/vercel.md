@@ -32,7 +32,7 @@ node path/to/skills/gadget-migration/scripts/preflight.ts path/to/new-app --plat
 Three more that the script can't see:
 
 - **Function region and database region.** The function region is `iad1` unless `vercel.json` sets `regions`. Neon's console shows the database's, which should be AWS `us-east-1` for `iad1`.
-- **Static IPs.** Settings > Networking lists them. Look up each address's ASN with `whois -h whois.cymru.com " -v 203.0.113.10"` for Shopify's allowlist, as [IP allowlists](https://docs.gadget.dev/guides/moving-to-another-platform/vercel#ip-allowlists) describes.
+- **Static IPs.** Settings > Networking lists them. Look up each address's ASN with `whois -h whois.cymru.com " -v 203.0.113.10"` for Shopify's allowlist, as [IP allowlists](https://docs.gadget.dev/guides/moving-to-another-platform/vercel#ip-allowlists) describes. They cover your Vercel functions only, not tasks that a hosted queue such as Trigger.dev runs on its own machines; see [trigger-dev.md](trigger-dev.md).
 - **Duplicate and late schedule runs.** `vercel schedules executions list prune-audit-logs` lists each run with its execution id.
 
 ## Failure signatures
