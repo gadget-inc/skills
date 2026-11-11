@@ -48,6 +48,12 @@ before(async () => {
   // Created after app_role.sql, so app_user reaches these only through the default privileges.
   await admin.query(sql("actions-and-transactions.md", "db/migrations/outbox.sql"));
   await admin.query(`
+    create table shopify_order (id bigint primary key, shop_id bigint not null, total_price numeric(12, 2) not null);
+    alter table shopify_order enable row level security;
+    alter table shopify_order force row level security;
+    create policy shopify_order_shop_isolation on shopify_order using (shop_id = current_setting('app.shop_id')::bigint);
+  `);
+  await admin.query(`
     create table customer_note (id bigserial primary key, shop_id bigint not null, customer_id bigint not null, body text not null);
     alter table customer_note enable row level security;
     alter table customer_note force row level security;
@@ -269,6 +275,47 @@ describe("actions-and-transactions.md", { skip }, () => {
       );
     } finally {
       await prisma.$disconnect();
+    }
+  });
+
+  it("handleOrderCreated reaches the add on a retry after the add failed, and writes the order and its audit log once", async () => {
+    const { PrismaClient } = await import("@prisma/client");
+    const prisma = new PrismaClient({ datasourceUrl: appUrl });
+    const added: any[] = [];
+    let failNextAdd = true;
+    // the block reads prisma and externalQueue from the module scope of the app it came from
+    Object.assign(globalThis, {
+      prisma,
+      externalQueue: {
+        add: async (name: string, data: unknown, opts: { jobId: string }) => {
+          if (failNextAdd) {
+            failNextAdd = false;
+            throw new Error("connect ECONNREFUSED 127.0.0.1:6379");
+          }
+          added.push({ name, data, jobId: opts.jobId });
+        },
+      },
+    });
+    try {
+      const { handleOrderCreated } = await importBlock(sql("actions-and-transactions.md", "app/services/orders.server.ts (Prisma and BullMQ)"));
+      const order = { id: 5123456789, total_price: "19.99" };
+
+      // the first attempt commits both writes, then fails to queue the job
+      await assert.rejects(handleOrderCreated(7n, order), /ECONNREFUSED/);
+      // the retry skips the writes it already made and queues the job
+      await handleOrderCreated(7n, order);
+      // a later delivery of the same webhook writes nothing and adds a job with the same id
+      await handleOrderCreated(7n, order);
+
+      assert.deepEqual(added.map((job) => job.jobId), ["order-5123456789", "order-5123456789"]);
+      const orders = await admin.query("select shop_id::int, total_price::text from shopify_order where id = 5123456789");
+      assert.deepEqual(orders.rows, [{ shop_id: 7, total_price: "19.99" }]);
+      const logs = await admin.query("select count(*)::int as count from audit_log where order_id = 5123456789 and event = 'orderCreated'");
+      assert.equal(logs.rows[0].count, 1);
+    } finally {
+      await prisma.$disconnect();
+      delete (globalThis as any).prisma;
+      delete (globalThis as any).externalQueue;
     }
   });
 
