@@ -2,7 +2,7 @@
 // references/data-export.md, and the read query in references/frontend.md, against Postgres. See tests/README.md.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -228,13 +228,13 @@ describe("data-export.md", { skip }, () => {
   const record = (id: number, name: string, updatedAt: string, sku: string | null = null) =>
     JSON.stringify({ id: String(id), shop: "1", name, sku, createdAt: "2026-01-01T00:00:00.000Z", updatedAt });
 
-  async function load(lines: string[]) {
+  async function load(lines: string[], statement = sql("data-export.md", "db/load_widget.sql")) {
     const file = join(scratch, `export-${Math.random().toString(36).slice(2)}.ndjson`);
     writeFileSync(file, lines.join("\n") + "\n");
     const { loadNdjson } = await importBlock(blocks("data-export.md", "scripts/load-ndjson.ts")[0]);
     await admin.query("truncate widget_import");
     const loaded = await loadNdjson(admin, file, "widget_import");
-    await admin.query(sql("data-export.md", "db/load_widget.sql"));
+    await admin.query(statement);
     return loaded;
   }
   const names = async (ids: number[]) =>
@@ -272,6 +272,35 @@ describe("data-export.md", { skip }, () => {
     assert.equal(await load(many), 2500);
     const { rows } = await admin.query("select count(*)::int from widget where id between 1000 and 3499");
     assert.equal(rows[0].count, 2500);
+  });
+
+  it("brings back a row the new app deleted, unless the load skips the ids in deleted_widget", async () => {
+    // the clause the catch-up steps tell you to add after `from widget_import`
+    const reference = readFileSync(new URL("../../../skills/gadget/gadget-migration/references/data-export.md", import.meta.url), "utf8");
+    const clause = reference.match(/`(where \(doc->>'id'\)::bigint not in \(select id from deleted_widget\))` after `from widget_import`/)?.[1];
+    assert.ok(clause, "no deleted_widget clause in data-export.md");
+    const plain = sql("data-export.md", "db/load_widget.sql");
+    const skipDeleted = plain.replace("from widget_import\n", `from widget_import\n${clause}\n`);
+    assert.notEqual(skipDeleted, plain);
+
+    await admin.query("create table deleted_widget (id bigint primary key)");
+    try {
+      // the first export loads record 320, it changes in Gadget, and the new app deletes it before the catch-up
+      await load([record(320, "from Gadget", "2020-01-01T09:00:00.000Z")]);
+      await admin.query("delete from widget where id = 320");
+      await admin.query("insert into deleted_widget (id) values (320)");
+      const catchUp = [record(320, "changed in Gadget", "2020-01-01T10:05:00.000Z"), record(321, "new in Gadget", "2020-01-01T10:06:00.000Z")];
+
+      // no row for on conflict to find, so the plain load inserts it again
+      await load(catchUp);
+      assert.deepEqual(await names([320, 321]), { 320: "changed in Gadget", 321: "new in Gadget" });
+
+      await admin.query("delete from widget where id in (320, 321)");
+      await load(catchUp, skipDeleted);
+      assert.deepEqual(await names([320, 321]), { 321: "new in Gadget" });
+    } finally {
+      await admin.query("drop table deleted_widget");
+    }
   });
 
   it("loses the new app's change to the catch-up when its update leaves updated_at alone", async () => {
