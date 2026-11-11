@@ -1,5 +1,5 @@
 // Runs the SQL, the Prisma schema, and the loader in references/schema-mapping.md and
-// references/data-export.md against Postgres. See tests/README.md.
+// references/data-export.md, and the read query in references/frontend.md, against Postgres. See tests/README.md.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -118,10 +118,12 @@ describe("schema-mapping.md", { skip }, () => {
     await assert.rejects(admin.query(`${widget} values (107, 1, '', null, now())`), /widget_name_present/);
   });
 
-  it("moves the sequence past imported ids", async () => {
+  it("moves the sequence past imported ids, leaving a gap for records Gadget creates before the switch", async () => {
     await admin.query(sql("schema-mapping.md", "db/after_import.sql"));
     const { rows } = await admin.query("insert into widget (shop_id, name, updated_at) values (1, 'new', now()) returning id");
-    assert.equal(Number(rows[0].id), 105); // the highest imported id was 104
+    assert.equal(Number(rows[0].id), 1_000_105); // the highest imported id was 104
+    // a record Gadget created after the export arrives in the catch-up load with its next id, and fits in the gap
+    await admin.query(`${widget} values (105, 1, 'created in Gadget after the export', null, now())`);
   });
 
   it("keeps customers with no orders in the computed view", async () => {
@@ -247,5 +249,62 @@ describe("data-export.md", { skip }, () => {
     assert.equal(await load(many), 2500);
     const { rows } = await admin.query("select count(*)::int from widget where id between 1000 and 3499");
     assert.equal(rows[0].count, 2500);
+  });
+
+  it("loses the new app's change to the catch-up when its update leaves updated_at alone", async () => {
+    await load([record(300, "from Gadget", "2020-01-01T09:00:00.000Z")]);
+    await admin.query("update widget set name = 'renamed in the new app' where id = 300");
+    await load([record(300, "changed in Gadget", "2020-01-01T10:05:00.000Z")]);
+    assert.deepEqual(await names([300]), { 300: "changed in Gadget" });
+  });
+
+  it("keeps the new app's change once the trigger moves updated_at, and keeps Gadget's time on loaded rows", async () => {
+    await admin.query(sql("data-export.md", "db/migrations/widget_updated_at.sql"));
+    try {
+      // the same scenario with the trigger: the plain SQL update now moves updated_at, so the older copy is skipped
+      await load([record(310, "from Gadget", "2020-01-01T09:00:00.000Z")]);
+      await admin.query("update widget set name = 'renamed in the new app' where id = 310");
+      await load([record(310, "changed in Gadget", "2020-01-01T10:05:00.000Z")]);
+      assert.deepEqual(await names([310]), { 310: "renamed in the new app" });
+
+      // a row the new app never touched takes Gadget's newer copy, and repeating that copy keeps Gadget's time
+      await load([record(311, "first", "2020-01-01T09:00:00.000Z")]);
+      await load([record(311, "second", "2020-01-01T10:05:00.000Z")]);
+      await load([record(311, "second", "2020-01-01T10:05:00.000Z")]);
+      const gadgetTime = "select name, updated_at = '2020-01-01T10:05:00Z' as gadget_time from widget where id = 311";
+      assert.deepEqual((await admin.query(gadgetTime)).rows[0], { name: "second", gadget_time: true });
+
+      // an update that changes nothing, or sets updated_at itself as Prisma's @updatedAt does, keeps its value
+      await admin.query("update widget set name = name where id = 311");
+      await admin.query("update widget set name = 'third', updated_at = '2020-01-01T11:00:00Z' where id = 300");
+      assert.deepEqual((await admin.query(gadgetTime)).rows[0], { name: "second", gadget_time: true });
+      const { rows } = await admin.query("select updated_at = '2020-01-01T11:00:00Z' as kept from widget where id = 300");
+      assert.equal(rows[0].kept, true);
+
+      // a trigger that always writes now() stamps the load time on a repeated copy instead
+      await admin.query("create or replace function set_updated_at() returns trigger language plpgsql as $$ begin new.updated_at := now(); return new; end; $$");
+      await load([record(311, "second", "2020-01-01T10:05:00.000Z")]);
+      assert.deepEqual((await admin.query(gadgetTime)).rows[0], { name: "second", gadget_time: false });
+    } finally {
+      await admin.query("drop trigger if exists widget_set_updated_at on widget; drop function if exists set_updated_at()");
+    }
+  });
+});
+
+describe("frontend.md", { skip }, () => {
+  it("returns 6 rows with <> where Gadget's notEquals returned 8, and 8 in Gadget's order with is distinct from", async () => {
+    const client = await admin.connect();
+    try {
+      // a temporary table named widget hides the real one for this connection only
+      await client.query("create temporary table widget (id bigint primary key, status text)");
+      // inserted out of order, so only the order by puts them in id order
+      await client.query("insert into widget values (9, 'active'), (2, null), (7, 'draft'), (4, 'archived'), (1, 'active'), (6, null), (3, 'draft'), (8, 'active'), (5, 'active')");
+      const [plain, ported] = (await client.query(sql("frontend.md", "app/sql/unarchived_widgets.sql"))) as unknown as pg.QueryResult[];
+      assert.equal(plain.rowCount, 6);
+      assert.deepEqual(ported.rows.map((row) => Number(row.id)), [1, 2, 3, 5, 6, 7, 8, 9]);
+    } finally {
+      await client.query("drop table if exists pg_temp.widget");
+      client.release();
+    }
   });
 });

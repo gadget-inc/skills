@@ -127,7 +127,7 @@ The `jobId` is what drops the repeat, so don't set `removeOnComplete: true` on t
 | `applyParams`, `save` | Inserts and updates in your database client. `save` also ran the field validations, which are now constraints or checks in code ([schema-mapping.md](schema-mapping.md)) |
 | `record.changed("field")`, `record.changes()` | Lock and read the stored row, then compare it with the new values before writing ([shopify-webhooks.md](shopify-webhooks.md) has the pattern) |
 | `trigger.type`, such as `api`, `shopify_webhook`, `shopify_webhook_reconciliation`, `shopify_sync`, `scheduler`, `background-action` | Pass a `source` argument into the function if the code branches on it |
-| `api.internal.<model>` | Database queries inside the same transaction |
+| `api.internal.<model>` | Database queries inside the same transaction. Port each `findMany` with three things Gadget did: `notEquals` also matched null, so use `is distinct from`; Gadget added `id` as the last sort key, so end the `order by` with `id`; and it returned 50 records unless `first` was passed. [frontend.md](frontend.md#three-things-gadget-did-on-every-read) has a query where `<>` returns 6 rows and Gadget returned 8 |
 | `api.<model>.<action>()` from another action | A call to that action's new function. On Gadget it ran in its own transaction; decide whether it should share the caller's now |
 | `api.enqueue` | Your job queue ([background-jobs.md](background-jobs.md)) |
 | `api.actAsSession`, `api.actAsAdmin` | `api` in actions and routes had admin access unless the code used `actAsSession`. Loaders in `web/` had the session's access unless they used `actAsAdmin`. Port each call with the access it had ([shop-tenancy.md](shop-tenancy.md)) |

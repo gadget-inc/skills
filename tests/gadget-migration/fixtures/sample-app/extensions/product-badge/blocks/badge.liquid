@@ -1,0 +1,9 @@
+<span class="product-badge">{{ block.settings.label }}</span>
+
+{% schema %}
+{
+  "name": "Product badge",
+  "target": "section",
+  "settings": [{ "type": "text", "id": "label", "label": "Label", "default": "New" }]
+}
+{% endschema %}

@@ -128,10 +128,12 @@ Tables with their own id sequence start counting at 1. After loading exported re
 
 ```sql
 -- in db/after_import.sql
-select setval(pg_get_serial_sequence('widget', 'id'), (select max(id) from widget));
+select setval(pg_get_serial_sequence('widget', 'id'), (select max(id) from widget) + 1000000);
 ```
 
-On an empty table this does nothing, which is fine. Tables for Shopify models use Shopify's ids and have no sequence.
+The gap of 1,000,000 is for the records Gadget keeps creating between the export and the switch. They arrive in the catch-up load with Gadget's next ids, and without the gap the new app hands out the same ids to its own records. Make the gap larger than the number of records Gadget could create in that window.
+
+On an empty table `max(id)` is null and this does nothing, which is fine. Tables for Shopify models use Shopify's ids and have no sequence.
 
 ## A Shopify model and a custom model in Prisma
 
@@ -170,7 +172,7 @@ model Widget {
   tags      String[]
   dueOn     DateTime? @map("due_on") @db.Date
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  updatedAt DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
   shop      ShopifyShop @relation(fields: [shopId], references: [id])
 
   @@index([shopId, id])
@@ -178,7 +180,7 @@ model Widget {
 }
 ```
 
-`@updatedAt` makes Prisma set `updated_at` on every write it makes. Load exported records with SQL, as in [data-export.md](data-export.md), so they keep the `updatedAt` Gadget gave them.
+`@updatedAt` makes Prisma set `updated_at` on every write it makes, and `@default(now())` covers rows inserted any other way. Writes that skip Prisma need `updated_at` set too ([data-export.md](data-export.md) explains why). Load exported records with SQL, as in [data-export.md](data-export.md), so they keep the `updatedAt` Gadget gave them.
 
 ## Common pitfalls
 

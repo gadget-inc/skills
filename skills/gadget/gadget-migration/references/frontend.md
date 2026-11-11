@@ -32,7 +32,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const orders = await prisma.shopifyOrder.findMany({
     where: { shop: { myshopifyDomain: session.shop } },
-    orderBy: { shopifyCreatedAt: "desc" },
+    orderBy: [{ shopifyCreatedAt: "desc" }, { id: "asc" }], // Gadget added the id sort itself
     take: 50,
   });
   return { orders };
@@ -58,6 +58,25 @@ Each option on a read hook has a counterpart in the query:
 | `live: true` | [realtime.md](realtime.md) |
 
 A loader returns JSON, so a `Date` or `Decimal` from Prisma reaches the component as a string or loses precision unless you convert it.
+
+### Three things Gadget did on every read
+
+A query that maps each option one to one still returns different records, because Gadget did three things that aren't database defaults. They hold for the hooks and for `findMany` calls in actions, through `api.<model>` or `api.internal.<model>`:
+
+- **`notEquals` also matched records where the field is null.** SQL's `<>` and Prisma's `not` skip them. Use `is distinct from` in SQL, or add `{ status: null }` in an `OR` in Prisma.
+- **Gadget sorted by `id` when no sort was passed, and added `id` as the last sort key otherwise.** Without it, Postgres returns rows in no fixed order, and rows that tie on the sort key in any order, so a paged loop can read one row twice and skip another. End the `order by` with `id`.
+- **`findMany` returned 50 records unless `first` was passed.** Add `take: 50` or `limit 50` where the code relied on it.
+
+A `widget` table has 9 rows: 6 `active` or `draft`, 2 with no status, and 1 `archived`. `api.widget.findMany({ filter: { status: { notEquals: "archived" } } })` returned 8 of them. The plain port returns 6:
+
+```sql
+-- in app/sql/unarchived_widgets.sql
+-- 6 rows: for the 2 rows with no status, <> gives null, not true
+select id from widget where status <> 'archived';
+
+-- 8 rows, the same records in the same order Gadget returned
+select id from widget where status is distinct from 'archived' order by id limit 50;
+```
 
 ### ❌ Filtering on the wrong store field
 

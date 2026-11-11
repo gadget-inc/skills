@@ -109,7 +109,15 @@ describe("inventory.ts on the sample app", () => {
     assert.match(output, /`GADGET_ENV`: set by Gadget/);
   });
 
-  it("lists extensions that still call the Gadget app", () => {
-    assert.match(output, /- `extensions\/checkout-banner\/src\/Checkout\.tsx`/);
+  it("lists every extension with its type, and marks the ones that call the Gadget app", () => {
+    assert.match(output, /## Shopify extensions \(references\/cutover\.md\)/);
+    assert.match(output, /Copy every one of these into the new project before its first `shopify app deploy`/);
+    // the setting's `type = "single_line_text_field"` is not the extension's type
+    assert.match(output, /- `extensions\/checkout-banner`: `ui_extension`\. Calls Gadget in `extensions\/checkout-banner\/src\/Checkout\.tsx`\n/);
+    // a Function and a theme block never call the app, and still have to move
+    assert.match(output, /- `extensions\/order-discount`: `function`\n/);
+    // theme app extensions keep `type` at the top level
+    assert.match(output, /- `extensions\/product-badge`: `theme`\n/);
+    assert.doesNotMatch(output, /single_line_text_field/);
   });
 });

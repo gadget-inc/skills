@@ -423,15 +423,44 @@ list([
 ]);
 say();
 
-const extensionCallers: string[] = [];
-for (const file of files.filter((file) => file.startsWith("extensions/") && /\.(ts|tsx|js|jsx|liquid|toml)$/.test(file))) {
-  if (/\.gadget\.app\b|@gadgetinc\/shopify-extensions/.test(await read(file))) extensionCallers.push(file);
+// ---------------------------------------------------------------- extensions
+// Every extension has to move, not only the ones that call Gadget: a deploy releases only the
+// extensions in the project it runs from, so a Shopify Function left behind disappears from every store.
+// The type is the `type` of each [[extensions]] block, or the top-level `type` in the older format
+// that theme app extensions still use. A `type` under any other table, such as a setting, is ignored.
+function extensionTypes(toml: string): string[] {
+  const ownType = (block: string) => block.split(/^\s*\[/m)[0].match(/^\s*type\s*=\s*"([^"]+)"/m)?.[1];
+  const types = [ownType(toml), ...toml.split(/^\s*\[\[extensions\]\]\s*$/m).slice(1).map(ownType)];
+  return [...new Set(types.filter((type): type is string => !!type))];
 }
-say(`## Shopify extensions that call the Gadget app (references/cutover.md)`);
+// an extension calls the app if it names a gadget.app URL, the app's own host (a custom domain), or a Gadget package
+const appHosts = new Set<string>();
+for (const file of tomlFiles) {
+  const url = (await read(file)).match(/application_url\s*=\s*"([^"]+)"/)?.[1];
+  if (url && URL.canParse(url)) appHosts.add(new URL(url).host);
+}
+const callsGadget = new RegExp(
+  [String.raw`\.gadget\.app\b`, "@gadgetinc/shopify-extensions", "@gadget-client/", ...[...appHosts].map((host) => host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))].join("|")
+);
+const extensionDirs = [...new Set(files.filter((file) => /^extensions\/[^/]+\//.test(file)).map((file) => file.split("/").slice(0, 2).join("/")))].sort();
+const extensionLines: string[] = [];
+for (const dir of extensionDirs) {
+  const tomlFile = `${dir}/shopify.extension.toml`;
+  const types = files.includes(tomlFile) ? extensionTypes(await read(tomlFile)) : [];
+  const typeText = types.length ? types.map((type) => `\`${type}\``).join(", ") : files.includes(tomlFile) ? "no `type` found" : "no `shopify.extension.toml`";
+  const callers: string[] = [];
+  for (const file of files.filter((file) => file.startsWith(`${dir}/`) && /\.(ts|tsx|js|jsx|liquid|toml)$/.test(file))) {
+    if (callsGadget.test(await read(file))) callers.push(file);
+  }
+  extensionLines.push(`\`${dir}\`: ${typeText}${callers.length ? `. Calls Gadget in ${callers.map((file) => `\`${file}\``).join(", ")}` : ""}`);
+}
+say(`## Shopify extensions (references/cutover.md)`);
 say();
-say(`Release new versions that point at the new app before moving tokens (references/shopify-tokens.md).`);
+say(
+  `Copy every one of these into the new project before its first \`shopify app deploy\`. A deploy releases only the extensions in the project it runs from, and the rest disappear from every store. Release the ones that call Gadget pointing at the new app before moving tokens (references/shopify-tokens.md).`
+);
 say();
-list(extensionCallers.map((file) => `\`${file}\``));
+list(extensionLines);
 say();
 
 // ---------------------------------------------------------------- environment variables

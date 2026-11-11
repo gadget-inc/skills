@@ -29,7 +29,7 @@ Gadget gets new tokens for a store in five ways while its environment is active:
 1. When it calls Shopify in a token's last 2 minutes, for your code, a webhook, or a sync.
 2. When Shopify rejects a token with `401`.
 3. Once a day before its reconciliation, for every installed store that has a refresh token.
-4. When a request signed with the store's session token reaches it, from the Gadget frontend or an extension that still calls Gadget. If any of the store's four token fields is empty, this runs a token exchange.
+4. When a request signed with the store's session token reaches it, from the Gadget frontend or an extension that still calls Gadget. After the switch, that includes any admin page a merchant opened before it. If any of the store's four token fields is empty, this runs a token exchange.
 5. On API version 2026-04 and later, a background job that checks every hour for stores still on a non-expiring token and exchanges each one for an expiring pair. No merchant is involved, and Shopify revokes the old token the moment the exchange succeeds.
 
 Clearing Gadget's refresh token stops the first three. Only routing every request away from Gadget stops the fourth. The fifth only touches stores with a non-expiring token, and clearing a refresh token does nothing for those, because they have none.
@@ -40,13 +40,15 @@ Here is what copying a non-expiring token does on 2026-04 or later: the new app 
 
 ## The handoff, in order
 
-1. Release extensions that point at the new app, and switch webhooks and app URLs with `shopify app deploy` ([cutover.md](cutover.md)). Nothing reaches Gadget for the store after this.
+1. Release extensions that point at the new app, and switch webhooks and app URLs with `shopify app deploy` ([cutover.md](cutover.md)). New page loads go to the new app after this, but an admin page a merchant opened before the switch still runs Gadget's frontend and sends session tokens to Gadget until it reloads. Wait until those requests stop appearing in Gadget's logs before step 4.
 2. Let Gadget's background actions that call Shopify finish. Once a store's tokens move, Gadget's access token for it works for at most 1 more hour.
 3. For each store, skip it if the new app already has an offline session. A merchant who opened the new app after the switch gave it fresh tokens through token exchange, and those retired Gadget's.
 4. Read the store's tokens from Gadget's Internal API.
 5. If the store has a refresh token, save both tokens in the new app, then clear `refreshToken` on Gadget's `shopifyShop` record. If Gadget refreshed between your read and your clear, the pair you saved still works, because Gadget never used its newer refresh token.
 6. If the store has a non-expiring token, exchange it for an expiring pair and save that. The exchange revokes Gadget's copy at once. On apps below API version 2026-04, set Gadget's off switch first ([cutover.md](cutover.md) steps 4 and 7), because Gadget's next sync runs the store's `uninstall` action when it finds the token revoked.
 7. From then on, the new app refreshes every store before its refresh token expires, including quiet stores.
+
+Here is what a page left open does: a merchant opens the app at 09:00, the switch is at 10:00, and the store's tokens move at 10:30, which empties `refreshToken` on Gadget's record. At 14:00 the merchant saves from the 09:00 page. Gadget sees a session token for a store with an empty refresh token, logs `shop on 2026-04+ is missing one or more expiring-token fields; running token exchange to upgrade`, and runs a token exchange that retires the new app's refresh token. Gadget's off switch doesn't stop this, because Gadget authenticates the request before any action code runs. So after the move, search Gadget's logs for `running token exchange to upgrade`. Each entry names a store in `shopifyDomain`, and that store is back on Gadget's tokens. Once its requests to Gadget stop, delete the new app's offline session for that store and run the move script again, which copies Gadget's new pair and clears Gadget's copy, then check that the new app's next refresh for the store succeeds. This repair wasn't run end to end for this skill.
 
 These two functions do the refresh and the exchange with one request each:
 
