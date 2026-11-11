@@ -154,6 +154,8 @@ select cron.schedule('enqueue-prune-audit-logs', '0 2 * * *', $$ select pgmq.sen
 select cron.schedule('prune-cron-history', '30 3 * * *', $$ delete from cron.job_run_details where end_time < now() - interval '7 days' $$);
 ```
 
+pg_cron's one copy at a time then covers only the `pgmq.send`, and a second worker can read the next message while a long run still goes. Take the transaction-level advisory lock from [background-jobs.md](../background-jobs.md#scheduled-actions) in the handler that reads `scheduled`.
+
 ### Set the server role's password per environment
 
 The guide sets the password with `\password app_server`, which sends only a SCRAM hash, because Supabase's Postgres image logs every `alter role` statement. This script does the same without an interactive `psql`, for CI or each new environment: it sends a SCRAM verifier, checks that the role signs in through the pooler URL you give it, and prints the server's URL for your host's secrets. Run it in each environment, and again after `supabase db reset` or restoring a backup, which both leave the role without a password.
@@ -255,7 +257,7 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 
 ### Check the user import
 
-Run the guide's [import script](https://docs.gadget.dev/guides/moving-to-another-platform/supabase#move-app-users-and-sessions) first, then this. It finds exported users with no Supabase user, users Gadget had verified who can't sign in, and signs one user in with the publishable key, the way the browser will:
+Run the guide's [import script](https://docs.gadget.dev/guides/moving-to-another-platform/supabase#move-app-users-and-sessions) once, after writes to Gadget stop, as in the "Cutover without Shopify" section of [non-shopify-apps.md](../non-shopify-apps.md#cutover-without-shopify), then this. The import writes each user's `gadget_id` and roles into `app_metadata`, which the policies read. A second run skips users who exist, so a user imported earlier keeps that export's password hash and roles, and `updateUserById` with a new `password_hash` doesn't change the password either. Delete users you imported to test before the final run. This script finds exported users with no Supabase user, users Gadget had verified who can't sign in, and signs one user in with the publishable key, the way the browser will:
 
 ```typescript
 // in scripts/verify-users.ts

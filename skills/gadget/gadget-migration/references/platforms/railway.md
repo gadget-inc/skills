@@ -147,6 +147,8 @@ export default defineRailway((ctx) => {
 
 `railway config plan --environment staging` previews staging. Staging needs its own shared variables with its own Shopify app, and Railway doesn't copy sealed variables when it duplicates an environment, so seal `SHOPIFY_API_SECRET` there again. When `POOLED` becomes true, change the host and port in `DATABASE_URL` to those in the database's new `DATABASE_URL` as well.
 
+The cron service only adds a job, so Railway's skip covers that script and not the work: a job that outlasts its interval runs alongside the next one on a worker that takes more than one job at a time. Take the transaction-level advisory lock from [background-jobs.md](../background-jobs.md#scheduled-actions) in the job the worker runs.
+
 ### Public file URLs from a private bucket
 
 Gadget gave a public file field a URL that never expires. Railway buckets are private, and the AWS SDK signs a URL for 7 days at most, so a presigned URL stored in a Shopify metafield or an email breaks within a week. Store `https://app.example.com/files/<key>` instead, and let a route sign a fresh URL on each request. Upload and private download helpers are in [files-and-storage.md](../files-and-storage.md); this is the client they need on Railway, with the AWS SDK, for example:

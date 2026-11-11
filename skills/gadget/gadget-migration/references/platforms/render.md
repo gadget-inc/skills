@@ -187,6 +187,8 @@ projects:
 
 The Dockerfile needs `RUN npx prisma generate` after `COPY . .`, because `npm run start` skips the template's `docker-start` ([common.md](common.md)). The app's own role is the one the guide's [Rewrite permissions and shop tenancy](https://docs.gadget.dev/guides/moving-to-another-platform/render#rewrite-permissions-and-shop-tenancy) creates; test it through the pool on staging, because Render doesn't say whether its pool accepts roles you create. The file puts 2 environments in one project, and how many a project can have depends on the workspace's plan, on Render's [pricing page](https://render.com/pricing).
 
+The cron job only adds a job, so Render's one copy at a time covers that script and not the work: a job that outlasts its interval runs alongside the next one on a worker that takes more than one job at a time. Take the transaction-level advisory lock from [background-jobs.md](../background-jobs.md#scheduled-actions) in the job the worker runs.
+
 ### Start Workflows runs under the start limit
 
 The guide says to start each Render Workflows run from a queued job, because Render rejects starts over its per-minute limit with a `429` instead of queuing them. With BullMQ, for example, the nightly cron job calls `queueReconciliations` with the 300 store ids, and this worker starts the runs at most 40 a minute. Keep `max` below your workspace's start limit, which depends on its plan ([API rate limits](https://render.com/docs/workflows-limits#api-rate-limits)). BullMQ keeps the limiter in Redis, so it holds across every worker instance, including the old one during a deploy:

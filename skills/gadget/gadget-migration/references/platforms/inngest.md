@@ -200,7 +200,7 @@ export async function enqueue(name: string, shopId: bigint | string, data: Recor
 }
 ```
 
-``await enqueue("app/order.created", shopId, { orderId: order.id }, { id: `order-created-${order.id}` })`` replaces ``api.enqueue(api.notifyExternalSystem, { orderId }, { id: `order-created-${order.id}`, queue: { name: `external-${shopId}`, maxConcurrency: 2 } })``. The queue moves to the function's `concurrency`, so the call no longer names it.
+``await enqueue("app/order.created", shopId, { orderId: order.id }, { id: `order-created-${order.id}` })`` replaces ``api.enqueue(api.notifyExternalSystem, { orderId }, { id: `order-created-${order.id}`, queue: { name: `external-${shopId}`, maxConcurrency: 2 } })``. The queue moves to the function's `concurrency`, so the call no longer names it. Write the records before it with `createMany` and `skipDuplicates: true`, as the main guide's [Move action code to plain functions](https://docs.gadget.dev/guides/moving-to-another-platform#move-action-code-to-plain-functions) does, so a retry after a failed send skips the writes and reaches the send instead of failing on the order's id.
 
 ### Re-creating jobs Gadget had scheduled
 

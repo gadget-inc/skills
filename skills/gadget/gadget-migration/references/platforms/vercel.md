@@ -113,7 +113,7 @@ export async function pruneAuditLogs(executionId: string): Promise<string> {
 }
 ```
 
-Run through PgBouncer in transaction mode against Postgres 18: two concurrent calls with one execution id deleted the rows once, a third call with that id was skipped, and a call while another session held the lock was skipped. For work that needs Gadget's 5 retries, have the route send an event to your queue instead, with the execution id as the event id.
+Run through PgBouncer in transaction mode against Postgres 18: two concurrent calls with one execution id deleted the rows once, a third call with that id was skipped, and a call while another session held the lock was skipped. For work that needs Gadget's 5 retries, have the route send an event to your queue instead, with the execution id as the event id, and have the queued job call `pruneAuditLogs`, so the lock still applies.
 
 ## Cutover
 

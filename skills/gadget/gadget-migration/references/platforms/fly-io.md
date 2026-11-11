@@ -91,8 +91,8 @@ kill_timeout = 300
   SCOPES = "write_products"
 
 [processes]
-  web = "npm run start"
-  # node, not npm, so SIGTERM reaches the worker's handler
+  web = "./node_modules/.bin/react-router-serve ./build/server/index.js"
+  # both start without npm, so SIGTERM reaches the web server's and the worker's handlers
   worker = "node build/worker.js"
   # add this group in the cutover's "Move scheduled work" deploy, not before
   cron = "supercronic /app/crontab"
@@ -180,7 +180,7 @@ CMD ["npm", "run", "start"]
 0 2 * * * node /app/build/enqueue-prune-audit-logs.js
 ```
 
-The cron line runs the guide's [enqueue script](https://docs.gadget.dev/guides/moving-to-another-platform/fly-io#replace-scheduled-actions), compiled. This extends [common.md](common.md#run-a-bullmq-worker-that-drains-on-deploy)'s `build:worker` to bundle both files, with `esbuild` under `dependencies`:
+The cron line runs the guide's [enqueue script](https://docs.gadget.dev/guides/moving-to-another-platform/fly-io#replace-scheduled-actions), compiled. Supercronic waits only for that script, so the job the worker runs takes the transaction-level advisory lock from [background-jobs.md](../background-jobs.md#scheduled-actions), as the guide's section says. This `package.json` extends [common.md](common.md#run-a-bullmq-worker-that-drains-on-deploy)'s `build:worker` to bundle both files, with `esbuild` under `dependencies`:
 
 ```json
 // in package.json
@@ -237,7 +237,7 @@ fly certs setup app.example.com --app my-app            # add the _acme-challeng
 The order in [cutover.md](../cutover.md) and the guide's [cutover section](https://docs.gadget.dev/guides/moving-to-another-platform/fly-io#cut-over-to-the-new-platform) holds. On Fly.io:
 
 - **The `cron` group starts with the deploy that adds it.** Leave `cron` out of `[processes]` until the "Move scheduled work" step, then deploy and check `fly scale show` lists exactly 1 `cron` Machine.
-- **Drain time is at most 300 seconds.** A job running when the deploy starts gets `SIGTERM` and up to 5 minutes. Web Machines should stop in well under a second; a deploy that pauses about 5 minutes on each web Machine means the Redis connection is still open.
+- **Drain time is at most 300 seconds.** A job running when the deploy starts gets `SIGTERM` and up to 5 minutes. Web Machines should stop in well under a second; a deploy that pauses about 5 minutes on each web Machine means the Redis connection is still open, or the `web` command starts through npm and the signal never reached Node.
 - **Load records through `fly mpg proxy`**, which reaches Postgres directly, not PgBouncer, as the [load script](https://docs.gadget.dev/guides/moving-to-another-platform/fly-io#load-your-records) needs.
 - **Run `shopify app deploy` yourself** once `fly certs check` shows the certificate issued and both web Machines pass `/healthz`.
 - **Rollback:** `fly releases --image` lists each release's image, and `fly deploy --image <image>` deploys one. Its `release_command` runs from that older image: with Prisma 6.19.3, `prisma migrate deploy` with fewer migrations than the database has prints `No pending migrations to apply` and exits 0, so it doesn't block the rollback, and it doesn't undo anything either.
@@ -250,5 +250,6 @@ No Fly.io account was used, so nothing was deployed, and the commands in the che
 - The Dockerfile, crontab, and `build:worker` script were built with Docker on `node:22-alpine` (arm64), and `supercronic -test` passed on the crontab, with and without a `CRON_TZ` line. Without `tzdata`, `supercronic -test` printed `unknown time zone`. The amd64 Supercronic download was built under emulation; Fly.io's remote builders weren't tried.
 - With the tests in `tests/gadget-migration/platforms-fly-io`: a web server with common.md's queue module was still running 5 seconds after `SIGTERM`, and exited in about 230 ms with common.md's handler, but not on `SIGINT`. A worker under `npm run` that only handles `SIGTERM` died at once on `SIGINT`. ioredis 5.8.1 failed with `getaddrinfo ENOTFOUND` on an IPv6-only Docker network, not Upstash, and connected with `family: 6`.
 - The `P2021` error and the rollback's `release_command` came from Prisma 6.19.3 on Postgres 18.6.
+- The `web` command, `react-router-serve` started from `node_modules/.bin`, wasn't run on Fly.io. Confirm on staging that a deploy doesn't pause about 5 minutes per web Machine.
 
 From flyctl's source at the same commit, not run against the API: that `release_command` runs on the deployed image, the `fly mpg attach` error, the egress warning, and `fly launch` rewriting `shopify.app.toml` (in `@flydotio/dockerfile` 0.7.15, `fly.js`). From Fly.io's docs and the guide's fact-check only: the Writer role's grants and whether it bypasses row-level security, the 5-second default and 300-second maximum for `kill_timeout`, that `[env]` names can't start with `FLY_`, and the 64 Machines per egress pair.

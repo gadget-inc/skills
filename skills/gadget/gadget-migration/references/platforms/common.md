@@ -196,6 +196,8 @@ on conflict (id) do update
 
 One transaction holds its locks and its write-ahead log until the end, so load a 2.4-million-record model this way only when no direct URL exists.
 
+Loading the catch-up export with it needs the same two guards as the main guide's script in [Load your records](https://docs.gadget.dev/guides/moving-to-another-platform#load-your-records): the new app moves `updated_at` on every update, and a `deleted_widget` filter after `from widget_import` stops the load from inserting rows the new app deleted.
+
 ### Prepared statements through a pooler
 
 Whether your client works through a transaction-mode pooler depends on the client and the pooler's version, so try it before the switch. This script runs the same query from 20 concurrent callers through the URL you give it. A pooler that mixes up prepared statements fails it with `prepared statement "s0" already exists` or `prepared statement "s0" does not exist`:

@@ -286,7 +286,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 ```
 
-Callers use ``enqueueForShop(shopId, "tasks/notify-external-system", { orderId }, { key: `notify-${orderId}` })``. It's the guide's [`enqueueForShop`](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#limit-concurrency-per-store) on top of this file's `enqueue`, which takes a path and a `key` it hashes into the task name.
+Callers use ``enqueueForShop(shopId, "tasks/notify-external-system", { orderId }, { key: `notify-${orderId}` })``. It's the guide's [`enqueueForShop`](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#limit-concurrency-per-store) on top of this file's `enqueue`, which takes a path and a `key` it hashes into the task name. Every action that used `external-${shopId}` on Gadget calls `enqueueForShop` with its own route, so together they get the store's 2 dispatches, as they shared Gadget's limit.
 
 The stores that installed the app under Gadget never run the new install code, so create their queues before the switch. A new queue can take a few minutes to become available, longer than `enqueueForShop`'s two retries wait. `createShopQueue` ignores a queue that exists, so the script can run again:
 

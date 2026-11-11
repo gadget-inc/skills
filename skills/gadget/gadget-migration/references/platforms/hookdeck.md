@@ -54,7 +54,7 @@ What the script can't see:
 | After a filter change, no webhook reaches the new app, and the requests show as discarded | The filter is a plain array of domains, which only matches a value containing all of them | `$or` of exact domains (`hookdeck/filter-syntax`) |
 | A store that hasn't moved gets webhooks in the new app | `$in` matched part of its domain | `$or` of exact domains |
 | A store's webhooks still reach Gadget after you moved it | A filter change applies only to webhooks Hookdeck receives after it | Expected. Wait with `scripts/hookdeck.ts pending` ([Move one store at a time](https://docs.gadget.dev/guides/moving-to-another-platform/hookdeck#move-one-store-at-a-time)) |
-| Events with the error code `CANCELLED_PAST_RETENTION` | They outlived the plan's retention and can't be retried | Reconcile those stores ([shopify-sync.md](../shopify-sync.md)) |
+| Events with the error code `CANCELLED_PAST_RETENTION` | They outlived the plan's retention and can't be retried | Reconcile those stores ([shopify-sync.md](../shopify-sync.md)). A reconciliation never returns a deleted record, so also run `deleteMissing` for them ([Delete records Shopify deleted](../shopify-sync.md#delete-records-shopify-deleted-before-the-switch)) |
 | Events with the error code `TIMEOUT` | The route took longer than the destination's delivery timeout, 60 seconds by default | Speed up the route, or raise the timeout and keep the host's above it |
 | A delivery group named **Unknown** | Events with no `x-shopify-shop-domain` header, or received before grouping was turned on | Expected for those events |
 | A Gadget connection's test event gets Gadget's `404` with `cannot handle topic orders/updated for shop` | The sample's store isn't in your Gadget app | Expected: the connection reaches Gadget. Any other response means it doesn't |
@@ -266,9 +266,11 @@ The order in [cutover.md](../cutover.md) and the guide's [Cut over to the new pl
 - **Step 1, load its records:** as the guide says.
 - **Steps 2 and 3, stop its webhooks to Gadget and send them to the new app:** `insert into moved_store (shop_domain) values ('store-a.myshopify.com');`, then `node scripts/hookdeck.ts filters --apply`. One run writes both sides from the same list.
 - **Step 4, wait for Gadget:** repeat `node scripts/hookdeck.ts pending store-a.myshopify.com` until it prints `[]`, retry or note any `FAILED` events, then wait for Gadget's Queues page as the guide says.
-- **Steps 5 and 6, move its tokens and reconcile it:** as the guide says.
+- **Steps 5 and 6, move its tokens and reconcile it:** as the guide says, then remove the store's rows Shopify deleted while its webhooks went to Gadget or to neither app, with `deleteMissing` from [shopify-sync.md](../shopify-sync.md#delete-records-shopify-deleted-before-the-switch). A reconciliation never returns a deleted record.
 
-Before the token move, a store moves back with `delete from moved_store where shop_domain = '...'` and another `filters --apply`. After it, the store stays: only one app may hold its tokens. Before a deploy that would fail webhooks for a while, pause the connection, as the guide's [Keep Shopify data in sync](https://docs.gadget.dev/guides/moving-to-another-platform/hookdeck#keep-shopify-data-in-sync) describes.
+Split scheduled work, the off switch, each store's catch-up export, the id gap, and records that belong to no store as [Moving stores in stages](../cutover.md#moving-stores-in-stages) describes.
+
+A store moves back with `delete from moved_store where shop_domain = '...'` and another `filters --apply` only while the new app holds no offline session for it. A merchant who opened the new app after the store moved already retired Gadget's refresh token, so copy the new app's tokens back to the store's `shopifyShop` record first, as in [Moving back](../cutover.md#moving-back). After the token move, every store is in that state. Before a deploy that would fail webhooks for a while, pause the connection, as the guide's [Keep Shopify data in sync](https://docs.gadget.dev/guides/moving-to-another-platform/hookdeck#keep-shopify-data-in-sync) describes.
 
 ## What wasn't verified
 

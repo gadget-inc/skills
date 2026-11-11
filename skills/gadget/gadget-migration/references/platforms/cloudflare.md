@@ -128,7 +128,7 @@ The guide's file plus what it leaves out: `triggers`, the Shopify vars, and the 
 
 ### `workers/app.ts`
 
-The entry file: React Router for requests, the guide's queue consumer as `consumeExternal(batch, env)`, and one `scheduled` handler for both crons. Write `PruneAuditLogs` like the guide's Workflows, with one `step.do` per batch of a few thousand deletes, so a retry repeats one batch and no statement nears Hyperdrive's 60-second limit:
+The entry file: React Router for requests, the guide's queue consumer as `consumeExternal(batch, env)`, and one `scheduled` handler for both crons. Write `PruneAuditLogs` like the guide's Workflows, with one `step.do` per batch of a few thousand deletes, so a retry repeats one batch and no statement nears Hyperdrive's 60-second limit. The instance id stops only a repeat of the same run, so a job that can outlast its interval also needs a lock. In a Workflow with several steps, take a `ShopGate` lease named for the job, with a limit of 1, as the D1 note below says, because a transaction-level advisory lock ends with the step that took it:
 
 ```typescript
 // in workers/app.ts

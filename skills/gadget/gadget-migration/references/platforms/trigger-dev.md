@@ -176,7 +176,7 @@ export async function enqueue<TTask extends AnyTask>(id: TaskIdentifier<TTask>, 
 }
 ```
 
-In the guide's `handleOrderCreated`, the trigger after the commit becomes ``await enqueue<typeof notifyExternalSystemTask>("notify-external-system", { shopId: String(shopId), orderId: String(order.id) }, { shopId: String(shopId), id: `order-created-${order.id}` })``, with the task imported by `import type`.
+In the guide's `handleOrderCreated`, the trigger after the commit becomes ``await enqueue<typeof notifyExternalSystemTask>("notify-external-system", { shopId: String(shopId), orderId: String(order.id) }, { shopId: String(shopId), id: `order-created-${order.id}` })``, with the task imported by `import type`. Write the order with `createMany` and `skipDuplicates: true`, as the main guide's [Move action code to plain functions](https://docs.gadget.dev/guides/moving-to-another-platform#move-action-code-to-plain-functions) does, so a retry after a failed trigger skips the writes and reaches the trigger instead of failing on the order's id.
 
 ### A scheduled action, attached at cutover
 
