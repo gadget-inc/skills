@@ -118,10 +118,12 @@ describe("schema-mapping.md", { skip }, () => {
     await assert.rejects(admin.query(`${widget} values (107, 1, '', null, now())`), /widget_name_present/);
   });
 
-  it("moves the sequence past imported ids", async () => {
+  it("moves the sequence past imported ids, leaving a gap for records Gadget creates before the switch", async () => {
     await admin.query(sql("schema-mapping.md", "db/after_import.sql"));
     const { rows } = await admin.query("insert into widget (shop_id, name, updated_at) values (1, 'new', now()) returning id");
-    assert.equal(Number(rows[0].id), 105); // the highest imported id was 104
+    assert.equal(Number(rows[0].id), 1_000_105); // the highest imported id was 104
+    // a record Gadget created after the export arrives in the catch-up load with its next id, and fits in the gap
+    await admin.query(`${widget} values (105, 1, 'created in Gadget after the export', null, now())`);
   });
 
   it("keeps customers with no orders in the computed view", async () => {
