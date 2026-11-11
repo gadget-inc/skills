@@ -116,12 +116,12 @@ Decide before the switch what moving back means, because each step undoes differ
 | Step | To undo it |
 |---|---|
 | Webhooks and URLs | Deploy the old `shopify.app.toml` again. On framework 1.7 and later, a deploy from the Gadget editor does this |
-| Tokens | Stores whose tokens moved have no refresh token in Gadget. Gadget gets a new one the next time a merchant opens the app there, or copy the new app's current tokens back to the `shopifyShop` record and stop the new app from refreshing |
+| Tokens | Stores the new app holds a session for have had Gadget's refresh token retired, whether the session came from step 8 or from a merchant who opened the new app after step 6. Copy the new app's current tokens back to the `shopifyShop` record and stop the new app from refreshing, or wait for the merchant to open the app in Gadget, which gets new tokens then |
 | Scheduled work | Turn the Gadget scheduler triggers back on and deploy |
 | Records written in the new app | Not in Gadget. Export them from the new database and write them back through the API |
 | Per-store subscriptions | On framework 1.7 and later, an editor deploy registers them again. On earlier versions, choose **Register Webhooks** for each store on the Shopify connection's **Installs** page |
 
-The last cheap point to move back is before step 8. After tokens move, moving back is a second migration in the other direction.
+Moving back is cheap only for stores the new app holds no session for. Step 8 gives every store one, and before it a store whose merchant has opened the new app already needs its tokens copied back.
 
 ## Moving stores in stages
 
