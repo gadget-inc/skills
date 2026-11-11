@@ -6,7 +6,7 @@ import { scratchDatabase, skipWithoutDatabase as skip } from "./db.ts";
 import { importBlock, sql } from "./snippets.ts";
 
 let admin: pg.Pool;
-let deleteMissing: (db: pg.Pool | pg.PoolClient, options: object) => Promise<bigint[]>;
+let deleteMissing: (db: pg.Pool, options: object) => Promise<bigint[]>;
 
 before(async () => {
   if (skip) return;
@@ -57,16 +57,10 @@ describe("shopify-sync.md", { skip }, () => {
     await order(5000000003n, 1, "2026-11-05T10:00:00Z", "2026-11-09T10:00:00Z"); // recent, still in Shopify
     const options = { shopId: 1n, table: "shopify_order", currentIds: new Set([5000000003n]), listStartedAt };
 
-    // without the cutoff, the old order looks deleted because the list could never contain it
-    const client = await admin.connect();
-    try {
-      await client.query("begin");
-      const deleted = await deleteMissing(client, options);
-      assert.deepEqual(deleted.sort((a, b) => (a < b ? -1 : 1)), [5000000001n, 5000000002n]);
-    } finally {
-      await client.query("rollback");
-      client.release();
-    }
+    // without the cutoff, the old order looks deleted because the list could never contain it,
+    // and maxDeletes rolls that back instead of deleting both
+    await assert.rejects(deleteMissing(admin, { ...options, maxDeletes: 1 }), /would delete 2 rows from shopify_order for shop 1, over maxDeletes 1/);
+    assert.deepEqual(await remaining(), [5000000001n, 5000000002n, 5000000003n]);
 
     const createdSince = new Date(listStartedAt.getTime() - 59 * 24 * 60 * 60 * 1000);
     assert.deepEqual(await deleteMissing(admin, { ...options, createdSince }), [5000000002n]);

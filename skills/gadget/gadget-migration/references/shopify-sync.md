@@ -124,13 +124,13 @@ An id missing from the list proves a deletion only for a row the list would have
 
 ```typescript
 // in app/jobs/deleteMissing.server.ts
-import type { Pool, PoolClient } from "pg";
+import type { Pool } from "pg";
 
 // Deletes one store's rows whose ids a complete list from Shopify doesn't contain, and returns their ids.
 // Rename shopify_updated_at and shopify_created_at if your tables store Shopify's times under other names.
 export async function deleteMissing(
-  db: Pool | PoolClient,
-  { shopId, table, currentIds, listStartedAt, createdSince }: { shopId: bigint; table: string; currentIds: Set<bigint>; listStartedAt: Date; createdSince?: Date }
+  pool: Pool,
+  { shopId, table, currentIds, listStartedAt, createdSince, maxDeletes = 100 }: { shopId: bigint; table: string; currentIds: Set<bigint>; listStartedAt: Date; createdSince?: Date; maxDeletes?: number }
 ): Promise<bigint[]> {
   if (!/^[a-z_][a-z0-9_]*$/.test(table)) throw new Error(`unexpected table name: ${table}`);
   const values: unknown[] = [shopId.toString(), [...currentIds].map(String), listStartedAt];
@@ -140,21 +140,36 @@ export async function deleteMissing(
     values.push(createdSince);
     window = "and stored.shopify_created_at >= $4";
   }
-  // a row updated after the list started stays, and so does a row with no Shopify time
-  const { rows } = await db.query(
-    `delete from ${table} as stored
-     where stored.shop_id = $1
-       and stored.shopify_updated_at < $3
-       ${window}
-       and not exists (select 1 from unnest($2::bigint[]) as listed(id) where listed.id = stored.id)
-     returning stored.id`,
-    values
-  );
-  return rows.map((row) => BigInt(row.id));
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    // a row updated after the list started stays, and so does a row with no Shopify time
+    const { rows } = await client.query(
+      `delete from ${table} as stored
+       where stored.shop_id = $1
+         and stored.shopify_updated_at < $3
+         ${window}
+         and not exists (select 1 from unnest($2::bigint[]) as listed(id) where listed.id = stored.id)
+       returning stored.id`,
+      values
+    );
+    // a list that's missing records, such as from a filter or a failed bulk operation, deletes real rows: stop and look
+    if (rows.length > maxDeletes) {
+      await client.query("rollback");
+      throw new Error(`would delete ${rows.length} rows from ${table} for shop ${shopId}, over maxDeletes ${maxDeletes}; check the list is complete before raising it`);
+    }
+    await client.query("commit");
+    return rows.map((row) => BigInt(row.id));
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 ```
 
-`not exists` over `unnest` lets Postgres hash the list, so one statement handles a large store. In a local test, a table of 1,000,000 orders and a list of 999,000 ids took 0.6 seconds and deleted the 1,000 missing rows.
+`not exists` over `unnest` lets Postgres hash the list, so one statement handles a large store. `maxDeletes` rolls the delete back when it would remove more rows than you expect, because a list that left records out, such as one from a query with a filter you didn't mean or a bulk operation that stopped early, otherwise deletes them. Shopify's docs list `status` (`open`, `closed`, `cancelled`) as an optional filter on the GraphQL `orders` query and give no default, unlike the REST endpoint, which returns open orders unless asked; before the first sweep, compare the list's count with the store's order count on a development store. In a local test, a table of 1,000,000 orders and a list of 999,000 ids took 0.6 seconds and deleted the 1,000 missing rows.
 
 The list is a bulk query with only `id`. This example is for orders:
 
