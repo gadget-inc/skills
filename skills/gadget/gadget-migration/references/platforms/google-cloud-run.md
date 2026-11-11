@@ -29,6 +29,7 @@ It reads `gcloud` commands in shell scripts, CI workflows, and `cloudbuild.yaml`
 | `google-cloud-run/delete-queue` | `deleteQueue`, which blocks the name for 3 days | |
 | `google-cloud-run/pubsub-expiration` | A subscription without `--expiration-period`, deleted after 31 quiet days | `gcloud pubsub subscriptions describe shopify-webhooks-worker --format="yaml(expirationPolicy)"` |
 | `google-cloud-run/owner-skips-rls` | SQL migrations that turn on row-level security, while the migration job and a service read `DATABASE_URL` from the same secret, so the services connect as the tables' owner | `psql "host=127.0.0.1 dbname=my-app user=app_user" -f path/to/skills/gadget-migration/scripts/db-check.sql` through the Cloud SQL Auth Proxy |
+| `google-cloud-run/migrate-shared-account` | A migration job that runs as the same service account as a service, so that service's account can read the owner's URL in the migration secret | `gcloud secrets get-iam-policy migrate-database-url --project=my-app-production` should list only `my-app-migrate` |
 | `google-cloud-run/sql-user-create` | `gcloud sql users create`, which gives the user `CREATEROLE` and `CREATEDB` and adds it to `cloudsqlsuperuser` | |
 | `google-cloud-run/instance-limits` | A public service deployed without `--min` or `--max` | `gcloud run services describe my-app-web --region=us-central1 --format=yaml` shows the `minScale` and `maxScale` annotations |
 | Traffic pinned by a rollback | The newest revision gets no traffic | `gcloud run services describe my-app-web --region=us-central1 --format="yaml(status.traffic)"` should show `latestRevision: true` at `percent: 100` |
@@ -67,8 +68,8 @@ grant_project() { gcloud projects add-iam-policy-binding "$PROJECT" --member="se
 grant_on_account() { gcloud iam service-accounts add-iam-policy-binding "$1" --project="$PROJECT" --member="serviceAccount:$2" --role="$3" --quiet >/dev/null; }
 
 # each service runs as its own account, never the Compute Engine default; tasks-invoker, scheduler,
-# and pubsub-invoker only sign the tokens that call the private worker
-for name in my-app-web my-app-worker tasks-invoker scheduler pubsub-invoker; do
+# and pubsub-invoker only sign the tokens that call the private worker; my-app-migrate runs only the migration job
+for name in my-app-web my-app-worker my-app-migrate tasks-invoker scheduler pubsub-invoker; do
   gcloud iam service-accounts describe "$(sa "$name")" --project="$PROJECT" >/dev/null 2>&1 || gcloud iam service-accounts create "$name" --project="$PROJECT"
 done
 for secret in database-url migrate-database-url shopify-api-secret; do
@@ -88,8 +89,11 @@ for name in my-app-web my-app-worker; do
   gcloud storage buckets add-iam-policy-binding "$BUCKET" --member="serviceAccount:$(sa "$name")" --role=roles/storage.objectCreator >/dev/null  # signed uploads
 done
 
-# the migration job runs as my-app-worker and reads postgres's URL; the services read app_user's from database-url
-gcloud secrets add-iam-policy-binding migrate-database-url --project="$PROJECT" --member="serviceAccount:$(sa my-app-worker)" --role=roles/secretmanager.secretAccessor --quiet >/dev/null
+# only the migration job reads postgres's URL, as its own account; the services read app_user's from database-url
+grant_project "$(sa my-app-migrate)" roles/cloudsql.client
+gcloud secrets add-iam-policy-binding migrate-database-url --project="$PROJECT" --member="serviceAccount:$(sa my-app-migrate)" --role=roles/secretmanager.secretAccessor --quiet >/dev/null
+# no other account reads it: this removes the worker's access, which an earlier version of this script granted
+gcloud secrets remove-iam-policy-binding migrate-database-url --project="$PROJECT" --member="serviceAccount:$(sa my-app-worker)" --role=roles/secretmanager.secretAccessor --quiet >/dev/null 2>&1 || true
 
 # Cloud Tasks itself makes the OIDC token as tasks-invoker
 grant_on_account "$(sa tasks-invoker)" "service-${NUMBER}@gcp-sa-cloudtasks.iam.gserviceaccount.com" roles/iam.serviceAccountUser
@@ -150,7 +154,7 @@ gcloud builds submit --project="$PROJECT" --tag="$IMAGE"
 # a task stops after 10 minutes by default, partway through a long index build
 gcloud run jobs deploy my-app-migrate --project="$PROJECT" --region="$REGION" --image="$IMAGE" \
   --command=npx --args=prisma,migrate,deploy \
-  --service-account="my-app-worker@${PROJECT}.iam.gserviceaccount.com" \
+  --service-account="my-app-migrate@${PROJECT}.iam.gserviceaccount.com" \
   --set-cloudsql-instances="$SQL" --set-secrets="$MIGRATE_SECRETS" \
   --max-retries=0 --task-timeout=1h --wait
 

@@ -192,3 +192,33 @@ describe("Google Cloud Run checks", () => {
     withApp(files, (dir) => assert.deepEqual(where(own(preflight(dir, ["google-cloud-run"]).findings)), []));
   });
 });
+
+describe("google-cloud-run/migrate-shared-account", () => {
+  const deploy = (migrateAccount: string) =>
+    [
+      "set -euo pipefail",
+      'PROJECT="my-app-production"',
+      `gcloud run jobs deploy my-app-migrate --region=us-central1 --image=img --command=npx --args=prisma,migrate,deploy --service-account="${migrateAccount}@\${PROJECT}.iam.gserviceaccount.com" --set-secrets=DATABASE_URL=migrate-database-url:1 --execute-now --wait`,
+      'gcloud run deploy my-app-worker --region=us-central1 --image=img --service-account="my-app-worker@${PROJECT}.iam.gserviceaccount.com" --set-secrets=DATABASE_URL=database-url:1',
+    ].join("\n") + "\n";
+  const shared = (dir: string) => preflight(dir, ["google-cloud-run"]).findings.filter((f) => f.id === "google-cloud-run/migrate-shared-account");
+
+  it("warns when the migration job runs as a service's account", () => {
+    withApp({ "scripts/deploy.sh": deploy("my-app-worker") }, (dir) => {
+      const found = shared(dir);
+      assert.deepEqual(where(found), ["google-cloud-run/migrate-shared-account scripts/deploy.sh:3"]);
+      assert.equal(found[0].severity, "warning");
+      assert.match(found[0].message, /my-app-worker@my-app-production\.iam\.gserviceaccount\.com/);
+    });
+  });
+
+  it("says nothing when the migration job has its own account", () => {
+    withApp({ "scripts/deploy.sh": deploy("my-app-migrate") }, (dir) => assert.deepEqual(shared(dir), []));
+  });
+
+  it("finds nothing in the reference's deploy script, which gives the job my-app-migrate", () => {
+    const script = platformBlocks("google-cloud-run.md").find((b) => b.path === "scripts/deploy.sh")!.code;
+    assert.match(script, /--service-account="my-app-migrate@/);
+    withApp({ "scripts/deploy.sh": script }, (dir) => assert.deepEqual(shared(dir), []));
+  });
+});

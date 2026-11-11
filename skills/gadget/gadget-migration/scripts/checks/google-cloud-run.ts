@@ -605,6 +605,27 @@ function ownerFindings(repo: Repo, commands: Gcloud[], findings: Finding[]) {
   }
 }
 
+// The migration job reads the owner's URL. When it runs as the same service account as a service, that
+// service's account can read the migration secret too, even though the service never loads it.
+function sharedAccountFindings(commands: Gcloud[], findings: Finding[]) {
+  const jobs = commands.filter((c) => isCmd(c, "run", "jobs") && ["deploy", "create", "update"].includes(c.positional[2]) && MIGRATION_COMMAND.test([flag(c, "command") ?? "", ...(c.flags.get("args") ?? [])].join(" ")));
+  for (const job of jobs) {
+    const account = flag(job, "service-account");
+    if (!account) continue;
+    const service = commands.find((c) => isCmd(c, "run", "deploy") && flag(c, "service-account") === account);
+    if (!service) continue;
+    findings.push({
+      id: "google-cloud-run/migrate-shared-account",
+      severity: "warning",
+      file: job.file,
+      line: job.line,
+      message: `The migration job ${job.positional[3]} runs as ${account}, the same account as ${serviceName(service)}, so that account can read the migration job's secret, the URL of the user that owns the tables.`,
+      fix: "Run the migration job as its own service account, with roles/cloudsql.client and Secret Accessor on the migration secret only, and give no other account access to that secret.",
+      docs: `${GUIDE}#rewrite-permissions-and-shop-tenancy`,
+    });
+  }
+}
+
 function sqlUserFindings(commands: Gcloud[], findings: Finding[]) {
   // IAM database users (--type=cloud_iam_user and the like) aren't what the guide describes
   for (const c of commands.filter((c) => isCmd(c, "sql", "users", "create") && /^(built_in)?$/i.test(flag(c, "type") ?? ""))) {
@@ -646,6 +667,7 @@ export const googleCloudRun: CheckModule = {
     taskRouteFindings(repo, findings);
     migrateJobFindings(repo, commands, findings);
     ownerFindings(repo, commands, findings);
+    sharedAccountFindings(commands, findings);
     sqlUserFindings(commands, findings);
     return findings;
   },
