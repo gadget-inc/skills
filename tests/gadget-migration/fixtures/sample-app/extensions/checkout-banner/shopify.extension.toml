@@ -1,0 +1,20 @@
+api_version = "2026-04"
+
+[[extensions]]
+name = "Checkout banner"
+handle = "checkout-banner"
+type = "ui_extension"
+
+  [[extensions.targeting]]
+  module = "./src/Checkout.tsx"
+  target = "purchase.checkout.block.render"
+
+  [extensions.capabilities]
+  network_access = true
+
+[settings]
+
+  [[settings.fields]]
+  key = "banner_title"
+  type = "single_line_text_field"
+  name = "Banner title"

@@ -18,7 +18,7 @@ ggt pull --app my-app --env production
 node path/to/skills/gadget-migration/scripts/inventory.ts . > MIGRATION_INVENTORY.md
 ```
 
-`scripts/inventory.ts` needs Node 22.18+ or 23.6+ and no dependencies. It lists every model with its field types, a suggested table name, which fields to export and which Shopify can backfill, the fields that need extra steps, relationships, computed views, actions with their triggers, `api.enqueue` calls and their options, scheduled actions, HTTP routes, roles and Gelly filters, frontend hooks, environment variables, and the webhook topics and URLs in `shopify.app.toml`. Each section names the reference below that covers it. It scans action and frontend files as text, so confirm what it reports against the code.
+`scripts/inventory.ts` needs Node 22.18+ or 23.6+ and no dependencies. It lists every model with its field types, a suggested table name, which fields to export and which Shopify can backfill, the fields that need extra steps, relationships, computed views, actions with their triggers, `api.enqueue` calls and their options, scheduled actions, HTTP routes, roles and Gelly filters, frontend hooks, every extension with its type, environment variables, and the webhook topics and URLs in `shopify.app.toml`. Each section names the reference below that covers it. It scans action and frontend files as text, so confirm what it reports against the code.
 
 ## Order of work
 

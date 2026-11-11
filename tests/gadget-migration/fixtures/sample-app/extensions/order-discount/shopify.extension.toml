@@ -1,0 +1,15 @@
+api_version = "2026-04"
+
+[[extensions]]
+name = "Order discount"
+handle = "order-discount"
+type = "function"
+
+  [[extensions.targeting]]
+  target = "cart.lines.discounts.generate.run"
+  input_query = "src/run.graphql"
+  export = "run"
+
+  [extensions.build]
+  command = ""
+  path = "dist/function.wasm"
