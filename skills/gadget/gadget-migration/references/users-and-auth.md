@@ -193,6 +193,20 @@ Gadget's default `user` model has these fields:
 
 Fields you added to `user` move like any other model's fields ([schema-mapping.md](schema-mapping.md)).
 
+## Sign-ups after the move
+
+Gadget's `signUp` action created the `user` record and ran the code the app added to it. Gadget also gave the user the default roles from the app's authentication settings, `signed-in` unless changed: at sign-up for Google, and when the user verified their email for email and password. Imported users arrive with their rows and roles, so every test with an imported user passes while a new user has neither. The provider's new-user hook has to create the user's row in your tables, set the default roles, and run that code:
+
+| Provider | New-user hook |
+|---|---|
+| Supabase Auth | A Postgres trigger `after insert on auth.users` ([managing user data](https://supabase.com/docs/guides/auth/managing-user-data)). If the trigger fails, the sign-up fails. A new user has no `gadget_user_id`, so give that column a sequence moved past the imported ids ([schema-mapping.md](schema-mapping.md)), and the trigger's insert takes the next one |
+| Clerk | The `user.created` webhook ([syncing data](https://clerk.com/docs/guides/development/webhooks/syncing)). Clerk calls this sync eventually consistent, so the user's first request can arrive before the row exists |
+| Auth0 | The Post User Registration trigger ([trigger docs](https://auth0.com/docs/customize/actions/explore-triggers/post-user-registration)). Its docs name database and passwordless connections only, and it can't stop the sign-up, so test a Google sign-up separately |
+| Better Auth | `databaseHooks.user.create.after` in `betterAuth({ ... })` ([database docs](https://better-auth.com/docs/concepts/database)) |
+| Firebase Auth | The `beforeUserCreated` blocking function, which can also set the roles as custom claims ([blocking functions](https://firebase.google.com/docs/auth/extend-with-blocking-functions)) |
+
+Sign up as a new user before the switch, and check that the user can read and write what an imported user can.
+
 ## Sessions
 
 Gadget keeps each session as a record in the `session` model and identifies it with a token only Gadget can check. None of that moves, so every user signs in once more after the cutover. If you added fields to `session`, such as a cart for visitors who aren't signed in, that data is lost at the move unless you export the `session` model and attach the data to something the new app can find again, such as the user.
@@ -207,6 +221,7 @@ Backend code that read `session.get("user")` reads the signed-in user from the n
 - **Dropping `emailVerified`.** Users have to verify again.
 - **Replacing ids with the provider's.** Records that pointed at the user break. Keep a `gadget_user_id` column.
 - **Skipping the Google-only test.** A user who doesn't match gets a second, empty account.
+- **Testing only with imported users.** A new sign-up has no row and no roles until the provider's new-user hook creates them.
 - **Expecting sessions to carry over.** They can't. Tell users they'll sign in once more.
 - **Leaving the export file around.** It holds every password hash.
 
