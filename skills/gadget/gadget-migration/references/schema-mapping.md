@@ -172,7 +172,7 @@ model Widget {
   tags      String[]
   dueOn     DateTime? @map("due_on") @db.Date
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  updatedAt DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
   shop      ShopifyShop @relation(fields: [shopId], references: [id])
 
   @@index([shopId, id])
@@ -180,7 +180,7 @@ model Widget {
 }
 ```
 
-`@updatedAt` makes Prisma set `updated_at` on every write it makes. Load exported records with SQL, as in [data-export.md](data-export.md), so they keep the `updatedAt` Gadget gave them.
+`@updatedAt` makes Prisma set `updated_at` on every write it makes, and `@default(now())` covers rows inserted any other way. Writes that skip Prisma need `updated_at` set too ([data-export.md](data-export.md) explains why). Load exported records with SQL, as in [data-export.md](data-export.md), so they keep the `updatedAt` Gadget gave them.
 
 ## Common pitfalls
 

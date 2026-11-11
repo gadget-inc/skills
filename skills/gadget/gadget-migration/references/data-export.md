@@ -93,6 +93,26 @@ where widget.updated_at <= excluded.updated_at;
 
 The `distinct on` keeps the newest copy when a record appears twice in one file. Without it, Postgres rejects the statement with `ON CONFLICT DO UPDATE command cannot affect row a second time`.
 
+The `where` clause stops the catch-up load from putting Gadget's older copy over a row the new app changed, but only if the new app moved `updated_at` when it changed the row. If the new app updates record 42 at 11:10 with plain SQL that leaves `updated_at` at 09:00, the 11:20 catch-up load writes Gadget's 10:05 copy over the change ([the guide's example](https://docs.gadget.dev/guides/moving-to-another-platform#load-your-records)). Gadget set `updatedAt` to `statement_timestamp()` on every update and upsert, and the new app has to do the same. Prisma's `@updatedAt` covers only the writes Prisma makes. For every other writer, set `updated_at` in the update or add a trigger. Either way, give `created_at` and `updated_at` a default of `now()`, because Gadget set both and the schema files list neither.
+
+A trigger that always writes the current time breaks the load instead: it stamps each loaded row with the time of the load, so the next catch-up skips a change Gadget made between that export and that load. This one fills in `updated_at` only when an update changed the row and left the column alone:
+
+```sql
+-- in db/migrations/widget_updated_at.sql
+create function set_updated_at() returns trigger language plpgsql as $$
+begin
+  -- the load sets updated_at itself, and a load that repeats a copy the table has changes nothing
+  if new.updated_at is not distinct from old.updated_at and new is distinct from old then
+    new.updated_at := statement_timestamp();
+  end if;
+  return new;
+end;
+$$;
+
+create trigger widget_set_updated_at before update on widget
+for each row execute function set_updated_at();
+```
+
 This function fills `widget_import` from the file, 1,000 lines per insert. It avoids `copy`, whose text format treats the backslashes inside JSON strings as its own escapes:
 
 ```typescript

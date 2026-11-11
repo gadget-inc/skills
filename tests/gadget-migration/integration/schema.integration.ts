@@ -250,4 +250,43 @@ describe("data-export.md", { skip }, () => {
     const { rows } = await admin.query("select count(*)::int from widget where id between 1000 and 3499");
     assert.equal(rows[0].count, 2500);
   });
+
+  it("loses the new app's change to the catch-up when its update leaves updated_at alone", async () => {
+    await load([record(300, "from Gadget", "2020-01-01T09:00:00.000Z")]);
+    await admin.query("update widget set name = 'renamed in the new app' where id = 300");
+    await load([record(300, "changed in Gadget", "2020-01-01T10:05:00.000Z")]);
+    assert.deepEqual(await names([300]), { 300: "changed in Gadget" });
+  });
+
+  it("keeps the new app's change once the trigger moves updated_at, and keeps Gadget's time on loaded rows", async () => {
+    await admin.query(sql("data-export.md", "db/migrations/widget_updated_at.sql"));
+    try {
+      // the same scenario with the trigger: the plain SQL update now moves updated_at, so the older copy is skipped
+      await load([record(310, "from Gadget", "2020-01-01T09:00:00.000Z")]);
+      await admin.query("update widget set name = 'renamed in the new app' where id = 310");
+      await load([record(310, "changed in Gadget", "2020-01-01T10:05:00.000Z")]);
+      assert.deepEqual(await names([310]), { 310: "renamed in the new app" });
+
+      // a row the new app never touched takes Gadget's newer copy, and repeating that copy keeps Gadget's time
+      await load([record(311, "first", "2020-01-01T09:00:00.000Z")]);
+      await load([record(311, "second", "2020-01-01T10:05:00.000Z")]);
+      await load([record(311, "second", "2020-01-01T10:05:00.000Z")]);
+      const gadgetTime = "select name, updated_at = '2020-01-01T10:05:00Z' as gadget_time from widget where id = 311";
+      assert.deepEqual((await admin.query(gadgetTime)).rows[0], { name: "second", gadget_time: true });
+
+      // an update that changes nothing, or sets updated_at itself as Prisma's @updatedAt does, keeps its value
+      await admin.query("update widget set name = name where id = 311");
+      await admin.query("update widget set name = 'third', updated_at = '2020-01-01T11:00:00Z' where id = 300");
+      assert.deepEqual((await admin.query(gadgetTime)).rows[0], { name: "second", gadget_time: true });
+      const { rows } = await admin.query("select updated_at = '2020-01-01T11:00:00Z' as kept from widget where id = 300");
+      assert.equal(rows[0].kept, true);
+
+      // a trigger that always writes now() stamps the load time on a repeated copy instead
+      await admin.query("create or replace function set_updated_at() returns trigger language plpgsql as $$ begin new.updated_at := now(); return new; end; $$");
+      await load([record(311, "second", "2020-01-01T10:05:00.000Z")]);
+      assert.deepEqual((await admin.query(gadgetTime)).rows[0], { name: "second", gadget_time: false });
+    } finally {
+      await admin.query("drop trigger if exists widget_set_updated_at on widget; drop function if exists set_updated_at()");
+    }
+  });
 });
