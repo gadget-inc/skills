@@ -265,3 +265,110 @@ describe("google-cloud/memorystore-eviction", () => {
     );
   });
 });
+
+describe("Managed Connection Pooling checks", () => {
+  const pkg = (deps: Record<string, string> = {}) => JSON.stringify({ name: "my-app", dependencies: { "@google-cloud/tasks": "^6.2.0", ...deps } });
+  const infra = (pooling: boolean) => ["set -euo pipefail", `gcloud sql instances create my-app-db --database-version=POSTGRES_18 --region=us-central1${pooling ? " --enable-connection-pooling" : ""}`].join("\n") + "\n";
+  const deploy = (opts: { gen2?: boolean; direct?: boolean } = {}) =>
+    [
+      "set -euo pipefail",
+      opts.direct
+        ? "gcloud run jobs deploy my-app-migrate --region=us-central1 --image=img --command=npx --args=prisma,migrate,deploy --network=default --subnet=default --set-secrets=DATABASE_URL=migrate-database-url:2 --execute-now --wait"
+        : "gcloud run jobs deploy my-app-migrate --region=us-central1 --image=img --command=npx --args=prisma,migrate,deploy --set-cloudsql-instances=p:us-central1:my-app-db --set-secrets=DATABASE_URL=migrate-database-url:1 --execute-now --wait",
+      `gcloud run deploy my-app-web --region=us-central1 --image=img --add-cloudsql-instances=p:us-central1:my-app-db${opts.gen2 ? " --execution-environment=gen2" : ""}`,
+    ].join("\n") + "\n";
+  const ids = (files: Record<string, string>, id: string) => {
+    let out: string[] = [];
+    withApp(files, (dir) => (out = where(preflight(dir, ["google-cloud"]).findings.filter((f) => f.id === id))));
+    return out;
+  };
+
+  it("warns about first-generation services and a migration through the pool once pooling is on", () => {
+    const files = { "package.json": pkg(), "scripts/gcp-infra.sh": infra(true), "scripts/deploy.sh": deploy() };
+    assert.deepEqual(ids(files, "google-cloud/pooling-gen1"), ["google-cloud/pooling-gen1 scripts/deploy.sh:3"]);
+    assert.deepEqual(ids(files, "google-cloud/migrate-through-pool"), ["google-cloud/migrate-through-pool scripts/deploy.sh:2"]);
+  });
+
+  it("says nothing with gen2 services and a direct migration connection", () => {
+    const files = { "package.json": pkg(), "scripts/gcp-infra.sh": infra(true), "scripts/deploy.sh": deploy({ gen2: true, direct: true }) };
+    assert.deepEqual(ids(files, "google-cloud/pooling-gen1"), []);
+    assert.deepEqual(ids(files, "google-cloud/migrate-through-pool"), []);
+  });
+
+  it("says nothing when the repo never turns pooling on", () => {
+    const files = { "package.json": pkg({ "graphile-worker": "^0.16.6" }), "scripts/gcp-infra.sh": infra(false), "scripts/deploy.sh": deploy() };
+    for (const id of ["google-cloud/pooling-gen1", "google-cloud/migrate-through-pool", "google-cloud/listen-through-pool"]) assert.deepEqual(ids(files, id), []);
+  });
+
+  it("warns about Graphile Worker and the app's own LISTEN through the pool, not about a word in the UI", () => {
+    const files = {
+      "package.json": pkg({ "graphile-worker": "^0.16.6" }),
+      "scripts/gcp-infra.sh": infra(true),
+      "app/services/listen.server.ts": 'export async function watch(client: any) {\n  await client.query("LISTEN shop_changes");\n}\n',
+      "app/routes/app._index.tsx": 'export default function Index() {\n  return <p>{"Listen for new orders"}</p>;\n}\n',
+    };
+    assert.deepEqual(ids(files, "google-cloud/listen-through-pool"), ["google-cloud/listen-through-pool app/services/listen.server.ts:2", "google-cloud/listen-through-pool package.json:1"]);
+  });
+});
+
+describe("google-cloud/smtp-port-25", () => {
+  const pkg = JSON.stringify({ name: "my-app", dependencies: { "@google-cloud/tasks": "^6.2.0", nodemailer: "^7.0.10" } });
+  const mail = (transport: string) => ({ "package.json": pkg, "app/services/mail.server.ts": `import nodemailer from "nodemailer";\nexport const mailer = nodemailer.createTransport(${transport});\n` });
+  const smtp = (dir: string) => where(preflight(dir, ["google-cloud"]).findings.filter((f) => f.id === "google-cloud/smtp-port-25"));
+
+  it("warns about port 25, as an option or in a URL", () => {
+    withApp(mail('{ host: "smtp.example.com", port: 25 }'), (dir) => assert.deepEqual(smtp(dir), ["google-cloud/smtp-port-25 app/services/mail.server.ts:2"]));
+    withApp(mail('"smtp://user:pass@smtp.example.com:25"'), (dir) => assert.deepEqual(smtp(dir), ["google-cloud/smtp-port-25 app/services/mail.server.ts:2"]));
+  });
+
+  it("says nothing for 587, 2525, or no port", () => {
+    for (const t of ['{ host: "smtp.example.com", port: 587 }', '{ host: "smtp.example.com", port: 2525 }', '{ host: "smtp.example.com" }']) withApp(mail(t), (dir) => assert.deepEqual(smtp(dir), []));
+  });
+});
+
+describe("scheduled task names", () => {
+  const pkg = JSON.stringify({ name: "my-app", dependencies: { "@google-cloud/tasks": "^6.2.0" } });
+  const route = (body: string) => ({
+    "package.json": pkg,
+    "app/routes/schedules.prune-audit-logs.tsx": ['import type { ActionFunctionArgs } from "react-router";', 'import { enqueue } from "../tasks.server";', "export const action = async ({ request }: ActionFunctionArgs) => {", '  if (process.env.K_SERVICE !== "my-app-worker") return new Response(null, { status: 404 });', body, "  return new Response();", "};"].join("\n") + "\n",
+  });
+  const found = (files: Record<string, string>, id: string) => {
+    let out: string[] = [];
+    withApp(files, (dir) => (out = where(preflight(dir, ["google-cloud"]).findings.filter((f) => f.id === id))));
+    return out;
+  };
+
+  it("warns when a scheduled route names its task from the clock", () => {
+    const files = route('  const day = new Date().toISOString().slice(0, 10);\n  await enqueue("scheduled", "tasks/prune-audit-logs", {}, { key: `prune-audit-logs-${day}` });');
+    assert.deepEqual(found(files, "google-cloud/schedule-name-from-clock"), ["google-cloud/schedule-name-from-clock app/routes/schedules.prune-audit-logs.tsx:6"]);
+  });
+
+  it("says nothing when the name comes from X-CloudScheduler-ScheduleTime", () => {
+    const files = route('  const scheduleTime = request.headers.get("X-CloudScheduler-ScheduleTime");\n  if (!scheduleTime) return new Response(null, { status: 400 });\n  await enqueue("scheduled", "tasks/prune-audit-logs", {}, { key: `prune-audit-logs-${scheduleTime}` });');
+    assert.deepEqual(found(files, "google-cloud/schedule-name-from-clock"), []);
+  });
+
+  it("warns about a task name that ends in a timestamp or id, not one that ends in a hash", () => {
+    const tasks = (name: string) => ({ "package.json": pkg, "app/tasks.server.ts": `import { createHash } from "node:crypto";\nexport function taskName(parent: string, run: string, key: string) {\n  const hashed = createHash("sha256").update(key).digest("hex");\n  return { name: ${name} };\n}\n` });
+    assert.deepEqual(found(tasks("`${parent}/tasks/prune-audit-logs-${run}`"), "google-cloud/task-name-sequential"), ["google-cloud/task-name-sequential app/tasks.server.ts:4"]);
+    assert.deepEqual(found(tasks("`${parent}/tasks/${hashed}`"), "google-cloud/task-name-sequential"), []);
+    assert.deepEqual(found(tasks('`${parent}/tasks/${createHash("sha256").update(key).digest("hex")}`'), "google-cloud/task-name-sequential"), []);
+  });
+});
+
+describe("google-cloud/worker-pool-instances", () => {
+  const app = (flags: string) => ({ "package.json": JSON.stringify({ name: "my-app", dependencies: { bullmq: "^5.58.0" } }), "scripts/deploy.sh": `set -euo pipefail\ngcloud run deploy my-app-web --image=img --region=us-central1\ngcloud run worker-pools deploy my-app-worker --image=img --region=us-central1${flags}\n` });
+  const pools = (dir: string) => preflight(dir, ["google-cloud"]).findings.filter((f) => f.id === "google-cloud/worker-pool-instances");
+
+  it("asks for a fixed count when the deploy sets none", () => {
+    withApp(app(""), (dir) => {
+      const found = pools(dir);
+      assert.deepEqual(where(found), ["google-cloud/worker-pool-instances scripts/deploy.sh:3"]);
+      assert.equal(found[0].severity, "manual");
+    });
+  });
+
+  it("says nothing with --instances", () => {
+    withApp(app(" --instances=3"), (dir) => assert.deepEqual(pools(dir), []));
+  });
+});

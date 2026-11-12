@@ -33,6 +33,13 @@ It reads `gcloud` commands in shell scripts, CI workflows, and `cloudbuild.yaml`
 | `google-cloud/sql-user-create` | `gcloud sql users create`, which gives the user `CREATEROLE` and `CREATEDB` and adds it to `cloudsqlsuperuser` | |
 | `google-cloud/instance-limits` | A public service deployed without `--min` or `--max` | `gcloud run services describe my-app-web --region=us-central1 --format=yaml` shows the `minScale` and `maxScale` annotations |
 | `google-cloud/memorystore-eviction` | A `gcloud redis instances create` for a BullMQ app without `--redis-config=maxmemory-policy=noeviction`. Memorystore's default, `volatile-lru`, deletes queued jobs when memory fills | `gcloud redis instances describe my-app-queue --region=us-central1 --format="value(redisConfigs)"` |
+| `google-cloud/pooling-gen1` | With Managed Connection Pooling turned on in the repo, a service on the built-in connection without `--execution-environment=gen2`. Pooling needs Cloud SQL Auth Proxy 2.15.2 or later, and a first-generation service gets Auth Proxy v1 | |
+| `google-cloud/migrate-through-pool` | With pooling on, a migration job on the built-in connection, which then goes through the pool and can leave Prisma Migrate's advisory lock behind | |
+| `google-cloud/listen-through-pool` | With pooling on, Graphile Worker or code that runs `LISTEN`, which needs a connection of its own between transactions | |
+| `google-cloud/smtp-port-25` | Email over SMTP on port 25, which Google blocks from Compute Engine, GKE nodes, and Cloud Run functions | |
+| `google-cloud/schedule-name-from-clock` | A `schedules.*` route that names its task from `new Date()` instead of `X-CloudScheduler-ScheduleTime` | |
+| `google-cloud/task-name-sequential` | A task name that ends in a timestamp or an id instead of a hash. Cloud Tasks slows down on sequential names | |
+| `google-cloud/worker-pool-instances` | A worker pool deployed without `--instances`. A worker pool runs a fixed count and adds none when the queue grows | `gcloud run worker-pools describe my-app-worker --region=us-central1` |
 | Traffic pinned by a rollback | The newest revision gets no traffic | `gcloud run services describe my-app-web --region=us-central1 --format="yaml(status.traffic)"` should show `latestRevision: true` at `percent: 100` |
 
 ## Failure signatures
@@ -47,6 +54,10 @@ It reads `gcloud` commands in shell scripts, CI workflows, and `cloudbuild.yaml`
 | `createTask` fails with code `5` (`NOT_FOUND`) for one store | That store's queue was never created, such as for a store installed under Gadget, or it is reactivating after 30 idle days | `enqueueForShop` below creates it and retries ([Limit concurrency per store](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#limit-concurrency-per-store)) |
 | The fix you deployed after a rollback never gets traffic | `update-traffic --to-revisions` pinned traffic | `gcloud run services update-traffic my-app-web --to-latest --region=us-central1` |
 | A query with no store set returns every store's rows, and `scripts/db-check.sql` as the app's role reports `owns tables with row-level security` | The services read the migration job's secret, so they connect as the user that ran migrations and owns the tables | A second secret, `migrate-database-url`, for the migration job, and the URL of an app role you create with SQL in `database-url` (`google-cloud/owner-skips-rls`, [Rewrite permissions and shop tenancy](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#rewrite-permissions-and-shop-tenancy)) |
+| `Error: P1002` with `Timed out trying to acquire a postgres advisory lock (SELECT pg_advisory_lock(72707369)). Timeout: 10000ms.` from the migration job, after pooling was turned on | An earlier `migrate deploy` went through the pool and left Prisma's lock on a pooled connection. It fails the same way over a direct connection | As `postgres`, `select pg_terminate_backend(pid) from pg_locks where locktype = 'advisory' and objid = 72707369`, then give the job a direct connection (`google-cloud/migrate-through-pool`, [Run migrations once per deploy](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#run-migrations-once-per-deploy)) |
+| A `LISTEN` handler stops hearing notifications once pooling is on | The listener's connection goes through a pool that hands each transaction a different server connection | A direct connection for listeners (`google-cloud/listen-through-pool`) |
+| Mail never arrives, and each send ends in a connection timeout | SMTP on port 25, which Google Cloud blocks | Port 587 or 465, or the provider's HTTP API (`google-cloud/smtp-port-25`, [Email and custom domains](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#email-and-custom-domains)) |
+| A nightly job ran twice, or not at all the next night | The scheduled route named its task from the clock, so a retry after midnight took the next day's name | Name it from `X-CloudScheduler-ScheduleTime`, as `schedules.prune-audit-logs.tsx` below does (`google-cloud/schedule-name-from-clock`) |
 | A webhook answered `200` but its order was never saved | Work after the response gets no CPU with request-based billing | Create the task before responding ([Receive webhooks](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#receive-webhooks)) |
 
 ## Complete examples
@@ -151,7 +162,8 @@ MIGRATE_SECRETS="DATABASE_URL=migrate-database-url:1"
 
 gcloud builds submit --project="$PROJECT" --tag="$IMAGE"
 
-# --wait returns when the migration finishes, and set -e stops here if it failed (with pooling on, see the guide).
+# --wait returns when the migration finishes, and set -e stops here if it failed.
+# with Managed Connection Pooling on, swap --set-cloudsql-instances for a direct connection (Worker pools, AlloyDB, and pooling below)
 # a task stops after 10 minutes by default, partway through a long index build
 gcloud run jobs deploy my-app-migrate --project="$PROJECT" --region="$REGION" --image="$IMAGE" \
   --command=npx --args=prisma,migrate,deploy \
@@ -159,15 +171,16 @@ gcloud run jobs deploy my-app-migrate --project="$PROJECT" --region="$REGION" --
   --set-cloudsql-instances="$SQL" --set-secrets="$MIGRATE_SECRETS" \
   --max-retries=0 --task-timeout=1h --wait
 
-# the worker first, so it has every task route before the web creates tasks; --timeout matches enqueue's deadline
+# the worker first, so it has every task route before the web creates tasks; --timeout matches enqueue's deadline.
+# gen2 on both services: Managed Connection Pooling needs Auth Proxy 2.15.2 or later, and gen1 runs Auth Proxy v1
 gcloud run deploy my-app-worker --project="$PROJECT" --region="$REGION" --image="$IMAGE" \
-  --no-allow-unauthenticated --timeout=15m --max=5 \
+  --no-allow-unauthenticated --timeout=15m --max=5 --execution-environment=gen2 \
   --service-account="my-app-worker@${PROJECT}.iam.gserviceaccount.com" \
   --add-cloudsql-instances="$SQL" --env-vars-file="${ENV}.env.yaml" --set-secrets="$SECRETS"
 
 # --min=1 so webhooks don't wait for a cold start; --max=10 times a pool of 10 stays under max_connections
 gcloud run deploy my-app-web --project="$PROJECT" --region="$REGION" --image="$IMAGE" \
-  --allow-unauthenticated --min=1 --max=10 \
+  --allow-unauthenticated --min=1 --max=10 --execution-environment=gen2 \
   --service-account="my-app-web@${PROJECT}.iam.gserviceaccount.com" \
   --add-cloudsql-instances="$SQL" --env-vars-file="${ENV}.env.yaml" --set-secrets="$SECRETS"
 
@@ -192,7 +205,7 @@ const ALREADY_EXISTS = 6;
 const codeOf = (error: unknown) => (error as { code?: number }).code;
 
 export interface EnqueueOptions {
-  // the same on every delivery of the same work, such as a webhook id or "prune-audit-logs-2026-11-10"
+  // the same on every delivery of the same work, such as a webhook id, or "prune-audit-logs-" and the run's X-CloudScheduler-ScheduleTime
   key?: string;
   startAt?: Date;
 }
@@ -310,6 +323,34 @@ for (let i = 0; i < shops.length; i += 10) {
 await prisma.$disconnect();
 ```
 
+The route Cloud Scheduler calls for `pruneAuditLogs`. Its key comes from the run's scheduled time, which every retry of that run repeats, never from the handler's clock, and `enqueue` hashes it, because Cloud Tasks slows down on names with a sequential prefix such as a timestamp:
+
+```typescript
+// in app/routes/schedules.prune-audit-logs.tsx
+import type { ActionFunctionArgs } from "react-router";
+import { enqueue, workerTask } from "../tasks.server";
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  if (!workerTask(request)) return new Response(null, { status: 404 });
+  // such as 2026-11-13T02:00:00Z; Cloud Scheduler sends it only for unix-cron schedules
+  const scheduleTime = request.headers.get("X-CloudScheduler-ScheduleTime");
+  if (!scheduleTime) return new Response("missing X-CloudScheduler-ScheduleTime", { status: 400 });
+  // one task per scheduled run, so a repeated delivery or a retry after midnight adds nothing
+  await enqueue("scheduled", "tasks/prune-audit-logs", {}, { key: `prune-audit-logs-${new Date(scheduleTime).toISOString()}` });
+  return new Response();
+};
+```
+
+A manual `gcloud scheduler jobs run` sends the next run's time or no header, so it either takes the next run's task or gets `400` ([Replace scheduled actions](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#replace-scheduled-actions)).
+
+### Worker pools, AlloyDB, and pooling
+
+The guide's [Choose a compute service](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#choose-a-compute-service) and [Map your models to database tables](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#map-your-models-to-database-tables) name these alternatives. What changes for a moved app:
+
+- **Managed Connection Pooling** works only with Cloud SQL Auth Proxy 2.15.2 or later, and a Cloud Run service in the first-generation environment embeds Auth Proxy v1. Jobs and worker pools always run the second generation, so deploy both services with `--execution-environment=gen2`, as `scripts/deploy.sh` does, before `--enable-connection-pooling`, which restarts the database. Once pooling is on, the migration job's built-in connection goes through the pool too. Give the job Direct VPC egress (`--network=default --subnet=default`) in place of `--set-cloudsql-instances`, and a `migrate-database-url` version that points at the instance's private address on port 5432. The instance needs that address first: set up private services access on the network, then `gcloud sql instances patch my-app-db --network=default`. Workers that `LISTEN`, such as Graphile Worker's, need the same direct connection.
+- **Worker pools** run a container with no URL, for BullMQ or pg-boss workers that pull jobs. They don't autoscale on queue length: `--instances` sets a fixed count, or Google's CREMA autoscaler sets it for you. They reach Memorystore and a private database through Direct VPC egress, as Cloud Run services do. Since February 2026 they also accept private TCP connections through Direct VPC ingress, so a pooler such as PgBouncer can run on one instead of GKE or a VM. This file hasn't tested that.
+- **AlloyDB's `postgres` user** is in `alloydbsuperuser` with `CREATEROLE` and `CREATEDB`. It isn't a superuser, and Google doesn't list `BYPASSRLS` for it, but it owns the tables its migrations create, and Postgres skips the policies for a table's owner. Use the same split as Cloud SQL: an app role made with SQL for the services, and `postgres`'s URL for the migration job only. `google-cloud/owner-skips-rls` reads the secrets, not the database kind, so it covers AlloyDB too. AlloyDB's pool is off until you turn it on, pools by transaction on port 6432, and takes no public IP connections.
+
 The guide's [signed URL helpers](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#search-files-and-other-services) work as written once the IAM script has run.
 
 ## Cutover
@@ -331,4 +372,4 @@ No Google Cloud project was used, so nothing was deployed and no IAM grant was t
 - `app/tasks.server.ts` and the task route typecheck with `@google-cloud/tasks` 7.3.1 and TypeScript 5.9.3. Their retry paths ran against a stubbed `CloudTasksClient`, not Cloud Tasks.
 - The `Detected an empty appUrl configuration` and `Missing values for:` errors came from `@shopify/shopify-app-react-router` 3.0.2 with each variable removed.
 
-From Google's docs, the guide, or its fact-check only, and not reproduced: the `DEADLINE_EXCEEDED` and `504` behavior, the `PERMISSION_DENIED` and `signBlob` messages (Google's standard IAM error text), whether `gcloud run jobs deploy --wait` exits non-zero when the execution fails, the 3-day queue name hold, `NOT_FOUND` from a reactivating queue, the Pub/Sub expiration and dead-letter roles, the Cloud Tasks service agent's Service Account User grant.
+From Google's docs, the guide, or its fact-check only, and not reproduced: the `DEADLINE_EXCEEDED` and `504` behavior, the `PERMISSION_DENIED` and `signBlob` messages (Google's standard IAM error text), whether `gcloud run jobs deploy --wait` exits non-zero when the execution fails, the 3-day queue name hold, `NOT_FOUND` from a reactivating queue, the Pub/Sub expiration and dead-letter roles, the Cloud Tasks service agent's Service Account User grant. Added on 12 November 2026 from the same sources: whether a first-generation service fails against Managed Connection Pooling (Google says pooling needs Auth Proxy 2.15.2 or later, and gen1 embeds v1), Prisma Migrate through Cloud SQL's own pool (the `P1002` lock was reproduced through PgBouncer 1.25.2 for [render.md](render.md), not through Cloud SQL's pool), the port 25 block on Cloud Run services, which Google doesn't document, worker pools' Direct VPC ingress, and whether AlloyDB's `postgres` user has `BYPASSRLS`. The `gcloud` flags in the new checks (`--enable-connection-pooling`, `--execution-environment`, `--instances` on `run worker-pools deploy`, and the Memorystore `--redis-config` flags) were checked against the same image's help.

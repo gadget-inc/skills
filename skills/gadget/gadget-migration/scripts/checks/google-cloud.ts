@@ -2,6 +2,7 @@
 import { DOCS, type CheckModule, type Finding, type Repo } from "./types.ts";
 import { dockerCommand, keyLine, lineAt, lineOf, parseDockerfile, parseYaml } from "./read-config.ts";
 import { dockerfileCmd, expandScripts, startOverrideFindings } from "./common.ts";
+import { calls, mask } from "./source-scan.ts";
 import { arithmetic } from "./railway.ts";
 import { prismaUrls } from "./render.ts";
 
@@ -105,7 +106,7 @@ function toGcloud(file: string, line: number, raw: string[]): Gcloud {
   return { file, line, words, flags, positional };
 }
 
-const BOOLEAN_FLAGS = new Set(["allow-unauthenticated", "no-allow-unauthenticated", "execute-now", "wait", "async", "quiet", "no-traffic", "to-latest", "cpu-throttling", "no-cpu-throttling", "clear-env-vars", "clear-secrets", "cpu-boost", "no-cpu-boost"]);
+const BOOLEAN_FLAGS = new Set(["allow-unauthenticated", "no-allow-unauthenticated", "execute-now", "wait", "async", "quiet", "no-traffic", "to-latest", "cpu-throttling", "no-cpu-throttling", "clear-env-vars", "clear-secrets", "cpu-boost", "no-cpu-boost", "enable-connection-pooling", "no-enable-connection-pooling"]);
 
 // Plain NAME=value assignments in a script, so "$SECRETS" in a command can be read. A value that
 // uses a variable the script doesn't assign keeps its "$", and the checks treat it as unknown.
@@ -599,7 +600,7 @@ function ownerFindings(repo: Repo, commands: Gcloud[], findings: Finding[]) {
       line: job.line,
       message: `The migration job ${job.positional[3]} reads ${migrationVar} from the secret ${secret}, and ${serviceName(service)} reads ${appVar} from the same secret, so the services connect as the user that runs migrations and owns the tables. Postgres skips row-level security for a table's owner, so the policies on ${tables.join(", ")} (${unforced[0].file}) never apply to them.`,
       error: "a query with no store set returns every store's rows",
-      fix: `Give ${job.positional[3]} a second secret, such as migrate-database-url, with the postgres URL, and put the URL of an app role you create with SQL in ${secret}, as the guide's section shows. Then check once as that role that a query without app.shop_id set fails with unrecognized configuration parameter "app.shop_id", or run scripts/db-check.sql as it.`,
+      fix: `Give ${job.positional[3]} a second secret, such as migrate-database-url, with the postgres URL, and put the URL of an app role you create with SQL in ${secret}, as the guide's section shows. Then check once as that role that a query without app.shop_id set fails with unrecognized configuration parameter "app.shop_id" on a fresh connection, or invalid input syntax for type bigint: "" on a reused one, or run scripts/db-check.sql as it.`,
       docs: `${GUIDE}#rewrite-permissions-and-shop-tenancy`,
     });
   }
@@ -664,6 +665,147 @@ function memorystoreFindings(repo: Repo, commands: Gcloud[], findings: Finding[]
   }
 }
 
+// Managed Connection Pooling, turned on by a gcloud sql or alloydb command in the repo. Pooling
+// turned on in the console is invisible here, so these checks stay silent then.
+const poolingOn = (commands: Gcloud[]) => commands.find((c) => (isCmd(c, "sql", "instances") || isCmd(c, "alloydb", "instances")) && has(c, "enable-connection-pooling"));
+const usesBuiltInConnection = (c: Gcloud) => has(c, "add-cloudsql-instances", "set-cloudsql-instances");
+
+function poolingFindings(repo: Repo, commands: Gcloud[], findings: Finding[]) {
+  const pooling = poolingOn(commands);
+  if (!pooling) return;
+  const where = `${pooling.file}:${pooling.line}`;
+  // Cloud Run gen1 embeds Auth Proxy v1, and pooling needs 2.15.2 or later. Jobs and worker pools are always gen2.
+  for (const c of commands.filter((c) => isCmd(c, "run", "deploy") && usesBuiltInConnection(c) && flag(c, "execution-environment") !== "gen2")) {
+    findings.push({
+      id: "google-cloud/pooling-gen1",
+      severity: "warning",
+      file: c.file,
+      line: c.line,
+      message: `${where} turns on Managed Connection Pooling, which works only with Cloud SQL Auth Proxy 2.15.2 or later. ${serviceName(c)} uses the built-in connection without --execution-environment=gen2, and a service in the first-generation environment gets Auth Proxy v1.`,
+      fix: "Add --execution-environment=gen2 to every service that uses --add-cloudsql-instances, deploy it before you turn pooling on, and check its connections on staging.",
+      docs: `${GUIDE}#limit-connections-from-cloud-run`,
+    });
+  }
+  // Prisma Migrate holds a session advisory lock for its whole run, which a transaction pool leaves behind
+  for (const c of commands.filter((c) => (isCmd(c, "run", "jobs", "deploy") || isCmd(c, "run", "jobs", "create")) && /migrate|db[\s,]push/.test(c.words.join(" ")) && usesBuiltInConnection(c))) {
+    findings.push({
+      id: "google-cloud/migrate-through-pool",
+      severity: "warning",
+      file: c.file,
+      line: c.line,
+      message: `${where} turns on Managed Connection Pooling, and ${serviceName(c) ?? c.positional[3]} reaches the database through the built-in connection, which then goes through the pool. A migrate deploy there can leave Prisma's advisory lock held on a pooled connection, and the next deploy times out, even over a direct connection.`,
+      error: "Timed out trying to acquire a postgres advisory lock (SELECT pg_advisory_lock(72707369)). Timeout: 10000ms.",
+      fix: "Replace --set-cloudsql-instances on the migration job with Direct VPC egress (--network and --subnet) and a migrate-database-url version that points at the instance's private address on port 5432. To clear a lock already left, run select pg_terminate_backend(pid) from pg_locks where locktype = 'advisory' and objid = 72707369 as postgres.",
+      docs: `${GUIDE}#run-migrations-once-per-deploy`,
+    });
+  }
+  // Graphile Worker, or the app's own LISTEN, needs a session that a transaction pool doesn't keep
+  const listeners: { file: string; line: number; what: string }[] = [];
+  if (repo.dependencies()["graphile-worker"]) listeners.push({ file: "package.json", line: lineOf(repo.read("package.json") ?? "", /"graphile-worker"/), what: "Graphile Worker, which learns about new jobs through LISTEN," });
+  for (const file of repo.sourceFiles()) {
+    const text = repo.read(file) ?? "";
+    const m = /["'`]\s*LISTEN\s+[\w"]+\s*;?\s*["'`]/.exec(text) ?? /\.on\(\s*["']notification["']/.exec(text);
+    if (m) listeners.push({ file, line: lineAt(text, m.index), what: "This code, which uses LISTEN and NOTIFY," });
+  }
+  for (const l of listeners) {
+    findings.push({
+      id: "google-cloud/listen-through-pool",
+      severity: "warning",
+      file: l.file,
+      line: l.line,
+      message: `${l.what} needs a connection that stays its own between transactions, and ${where} turns on Managed Connection Pooling, which pools by transaction. Through the pool, a listener stops hearing notifications.`,
+      fix: "Give the workers that listen a direct connection to the database, such as Direct VPC egress to the instance's private address on port 5432, and keep the pooled URL for everything else.",
+      docs: `${GUIDE}#replace-background-and-scheduled-actions`,
+    });
+  }
+}
+
+// Google blocks outbound port 25 from Compute Engine and Cloud Run functions, and doesn't document it for Cloud Run services.
+function smtpFindings(repo: Repo, findings: Finding[]) {
+  for (const file of repo.sourceFiles()) {
+    const text = repo.read(file) ?? "";
+    const call = [...calls(text, "createTransport"), ...calls(text, "setTransport")].find((c) => /\bport\s*:\s*["']?25\b(?!\d)/.test(text.slice(c.open, c.close)));
+    const url = /["'`]smtps?:\/\/[^"'`\s]*:25(?![\d])/.exec(text);
+    const index = call?.index ?? url?.index;
+    if (index === undefined) continue;
+    findings.push({
+      id: "google-cloud/smtp-port-25",
+      severity: "warning",
+      file,
+      line: lineAt(text, index),
+      message: "This sends email over SMTP on port 25. Google Cloud blocks outbound connections to port 25 from Compute Engine, GKE nodes, and Cloud Run functions, and Cloud Run's docs don't say it's open for services.",
+      fix: "Use your email provider's port 587 or 465, or its HTTP API.",
+      docs: `${GUIDE}#email-and-custom-domains`,
+    });
+  }
+}
+
+// A scheduled route that names its task from the handler's clock: a retry that crosses midnight
+// takes the next day's name. Cloud Scheduler sends the run's own time in X-CloudScheduler-ScheduleTime.
+const CLOCK = /new Date\(\s*\)|Date\.now\(\s*\)/;
+function scheduleNameFindings(repo: Repo, findings: Finding[]) {
+  for (const file of repo.find(/^app\/routes\/schedules[.\/][^/]*\.(ts|tsx|js|jsx)$/)) {
+    const text = repo.read(file) ?? "";
+    if (/x-cloudscheduler-scheduletime/i.test(text)) continue;
+    const code = mask(text, false);
+    // names assigned from the clock, such as const day = new Date().toISOString().slice(0, 10)
+    const fromClock = new Set([...code.matchAll(/\b(?:const|let|var)\s+(\w+)\s*=\s*([^;\n]*)/g)].filter((m) => CLOCK.test(m[2])).map((m) => m[1]));
+    const property = [...code.matchAll(/\b(key|name|id|taskName)\s*:\s*([^,}\n]*)/g)].find(
+      (m) => CLOCK.test(m[2]) || [...fromClock].some((v) => new RegExp(`\\$\\{\\s*${v}\\b|\\b${v}\\b`).test(m[2]))
+    );
+    if (!property) continue;
+    findings.push({
+      id: "google-cloud/schedule-name-from-clock",
+      severity: "warning",
+      file,
+      line: lineAt(text, property.index!),
+      message: "This scheduled route names its task from the handler's clock. A run that Cloud Scheduler retries after midnight takes the next day's name, so its work runs twice and the next day's run finds the name taken.",
+      fix: 'Build the name from the run\'s scheduled time, request.headers.get("X-CloudScheduler-ScheduleTime"), which every retry of the run repeats, and hash it with createHash("sha256") before it becomes a task name.',
+      docs: `${GUIDE}#replace-scheduled-actions`,
+    });
+  }
+}
+
+// Cloud Tasks warns that sequential task names, such as timestamps or increasing ids, slow it down.
+function taskNameFindings(repo: Repo, findings: Finding[]) {
+  for (const file of repo.sourceFiles()) {
+    const text = repo.read(file) ?? "";
+    if (!text.includes("/tasks/")) continue;
+    const code = mask(text, false);
+    const hashed = new Set([...code.matchAll(/\b(?:const|let|var)\s+(\w+)\s*=\s*[^;\n]*(?:createHash|\.digest\s*\()/g)].map((m) => m[1]));
+    for (const m of text.matchAll(/\bname\s*:\s*`([^`]*\/tasks\/[^`]*)`/g)) {
+      const tail = m[1].slice(m[1].indexOf("/tasks/"));
+      const inName = [...tail.matchAll(/\$\{([^}]*)\}/g)].map((p) => p[1].trim());
+      if (!inName.length) continue;
+      if (inName.every((e) => /createHash|digest\s*\(/.test(e) || hashed.has(e))) continue;
+      findings.push({
+        id: "google-cloud/task-name-sequential",
+        severity: "warning",
+        file,
+        line: lineAt(text, m.index!),
+        message: `This task name ends with ${inName.map((e) => `\${${e}}`).join(" and ")}, not a hash. Cloud Tasks slows down on names that are sequential or share a sequential prefix, such as a timestamp or an increasing id.`,
+        fix: 'Name the task with a hash of the key, such as createHash("sha256").update(key).digest("hex"), which keeps the name the same for the same key.',
+        docs: `${GUIDE}#create-tasks-from-your-app`,
+      });
+    }
+  }
+}
+
+// Worker pools don't autoscale on queue length: --instances sets a fixed count.
+function workerPoolFindings(commands: Gcloud[], findings: Finding[]) {
+  for (const c of commands.filter((c) => isCmd(c, "run", "worker-pools", "deploy") && !has(c, "instances"))) {
+    findings.push({
+      id: "google-cloud/worker-pool-instances",
+      severity: "manual",
+      file: c.file,
+      line: c.line,
+      message: `This deploys worker pool ${c.positional[3] ?? "my-app-worker"} without --instances. A worker pool runs a fixed number of instances and doesn't add any when the queue grows.`,
+      fix: "Set --instances to the count your busiest hour needs, or run Google's CREMA autoscaler next to the pool, and check the count with gcloud run worker-pools describe.",
+      docs: `${GUIDE}#choose-a-compute-service`,
+    });
+  }
+}
+
 export const googleCloud: CheckModule = {
   platform: "google-cloud",
   title: "Google Cloud",
@@ -693,6 +835,11 @@ export const googleCloud: CheckModule = {
     sharedAccountFindings(commands, findings);
     sqlUserFindings(commands, findings);
     memorystoreFindings(repo, commands, findings);
+    poolingFindings(repo, commands, findings);
+    smtpFindings(repo, findings);
+    scheduleNameFindings(repo, findings);
+    taskNameFindings(repo, findings);
+    workerPoolFindings(commands, findings);
     return findings;
   },
 };
