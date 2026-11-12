@@ -41,6 +41,7 @@ Read the platform's reference alongside the steps. Each has checks to run, the e
 | Railway | [references/platforms/railway.md](references/platforms/railway.md) | `use-railway` in [railwayapp/railway-skills](https://github.com/railwayapp/railway-skills) |
 | Fly.io | [references/platforms/fly-io.md](references/platforms/fly-io.md) | `fly` in [superfly/skills](https://github.com/superfly/skills) |
 | Google Cloud: Cloud Run, Cloud Tasks, Cloud SQL | [references/platforms/google-cloud.md](references/platforms/google-cloud.md) | `cloud-run-basics`, `cloud-sql-basics` in [google/skills](https://github.com/google/skills) |
+| AWS: ECS on Fargate, RDS, SQS, EventBridge Scheduler | [references/platforms/aws.md](references/platforms/aws.md) | `aws-containers`, `aws-database`, `aws-messaging-and-streaming` in [aws/agent-toolkit-for-aws](https://github.com/aws/agent-toolkit-for-aws) |
 | Supabase | [references/platforms/supabase.md](references/platforms/supabase.md) | `supabase` in [supabase/agent-skills](https://github.com/supabase/agent-skills) |
 | Cloudflare Workers, Hyperdrive, Workflows | [references/platforms/cloudflare.md](references/platforms/cloudflare.md) | `cloudflare`, `wrangler` in [cloudflare/skills](https://github.com/cloudflare/skills) |
 | Hookdeck for Shopify webhooks | [references/platforms/hookdeck.md](references/platforms/hookdeck.md) | `event-gateway` in [hookdeck/agent-skills](https://github.com/hookdeck/agent-skills) |

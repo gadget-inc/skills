@@ -1,0 +1,64 @@
+{
+  "family": "my-app-web",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::123456789012:role/my-app-execution",
+  "taskRoleArn": "arn:aws:iam::123456789012:role/my-app-task",
+  "containerDefinitions": [
+    {
+      "name": "app",
+      "image": "IMAGE",
+      "command": [
+        "npm",
+        "run",
+        "start"
+      ],
+      "portMappings": [
+        {
+          "containerPort": 3000
+        }
+      ],
+      "stopTimeout": 120,
+      "environment": [
+        {
+          "name": "SHOPIFY_APP_URL",
+          "value": "https://app.example.com"
+        },
+        {
+          "name": "SHOPIFY_API_KEY",
+          "value": "production-client-id"
+        },
+        {
+          "name": "SCOPES",
+          "value": "read_orders"
+        },
+        {
+          "name": "JOBS_QUEUE_URL",
+          "value": "https://sqs.us-east-1.amazonaws.com/123456789012/jobs"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:123456789012:secret:my-app/database-url-AbCdEf"
+        },
+        {
+          "name": "SHOPIFY_API_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:123456789012:secret:my-app/shopify-api-secret-GhIjKl"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/my-app",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "web"
+        }
+      }
+    }
+  ]
+}
