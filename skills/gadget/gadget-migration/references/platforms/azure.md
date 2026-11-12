@@ -174,28 +174,29 @@ grant_secret() {
     echo "store $2 in $VAULT, then run this script again"
   fi
 }
-for secret in database-url shopify-api-secret; do grant_secret "$APP_PRINCIPAL" "$secret"; done
+for secret in database-url lock-database-url shopify-api-secret; do grant_secret "$APP_PRINCIPAL" "$secret"; done
 grant_secret "$MIGRATE_PRINCIPAL" migrate-database-url
 
 echo "outbound address: $EGRESS_IP. Add it to Shopify's IP allowlist next to Gadget's ASN 396982."
 ```
 
-The script grants on each secret by name instead of on the vault, so `my-app` can read `database-url` and `shopify-api-secret` and only `my-app-migrate` can read `migrate-database-url`. Storing a secret needs the Key Vault Secrets Officer role on the vault for whoever runs `az keyvault secret set`. Create `app_user` with SQL as [Rewrite permissions and shop tenancy](https://docs.gadget.dev/guides/moving-to-another-platform/azure#rewrite-permissions-and-shop-tenancy) shows, then store its URL on port 6432 as `database-url` and the `myadmin` URL on port 5432 as `migrate-database-url`.
+The script grants on each secret by name instead of on the vault, so only `my-app-migrate` can read `migrate-database-url`. Storing a secret needs the Key Vault Secrets Officer role on the vault for whoever runs `az keyvault secret set`. Create `app_user` with SQL as [Rewrite permissions and shop tenancy](https://docs.gadget.dev/guides/moving-to-another-platform/azure#rewrite-permissions-and-shop-tenancy) shows, then store its URL on port 6432 as `database-url`, on port 5432 as `lock-database-url` for the per-store lock, and the `myadmin` URL on port 5432 as `migrate-database-url`.
 
-Every app and job, created once with the same variables and pinned secrets. The guide says every app and job that imports `shopify.server.ts` needs the Shopify variables, and here they're in one list, so a new job can't miss one:
+Every app and job, created once with the same variables and pinned secrets in one list, so a new job can't miss one:
 
 ```bash
 # in scripts/azure-apps.sh
-# usage: bash scripts/azure-apps.sh production v42 <database-url version> <shopify-api-secret version> <migrate-database-url version>
-# Creates every app and job once, after azure-env.sh and after the three secrets are stored in Key Vault.
+# usage: bash scripts/azure-apps.sh production v42 <version of database-url> <shopify-api-secret> <migrate-database-url> <lock-database-url>
+# Creates every app and job once, after azure-env.sh and after the four secrets are stored in Key Vault.
 # Each later deploy runs scripts/deploy.sh instead.
 set -euo pipefail
-USAGE="usage: azure-apps.sh staging|production <tag> <database-url version> <shopify-api-secret version> <migrate-database-url version>"
+USAGE="usage: azure-apps.sh staging|production <tag> <versions of database-url shopify-api-secret migrate-database-url lock-database-url>"
 ENV="${1:?$USAGE}"
 TAG="${2:?$USAGE}"
 DATABASE_URL_VERSION="${3:?$USAGE}"
 SHOPIFY_SECRET_VERSION="${4:?$USAGE}"
 MIGRATE_URL_VERSION="${5:?$USAGE}"
+LOCK_URL_VERSION="${6:?$USAGE}"
 RG="my-app-${ENV}"
 VAULT_URL="https://my-app-${ENV}-vault.vault.azure.net/secrets"
 IMAGE="myappregistry.azurecr.io/my-app:${TAG}"
@@ -208,6 +209,7 @@ SCALER_IDENTITY="$(az identity show --resource-group "$RG" --name my-app-scaler 
 SECRETS=(
   "database-url=keyvaultref:${VAULT_URL}/database-url/${DATABASE_URL_VERSION},identityref:${APP_IDENTITY}"
   "shopify-api-secret=keyvaultref:${VAULT_URL}/shopify-api-secret/${SHOPIFY_SECRET_VERSION},identityref:${APP_IDENTITY}"
+  "lock-database-url=keyvaultref:${VAULT_URL}/lock-database-url/${LOCK_URL_VERSION},identityref:${APP_IDENTITY}"
 )
 # every app and job that imports shopify.server.ts stops at startup without the Shopify variables
 ENV_VARS=(
@@ -220,6 +222,7 @@ ENV_VARS=(
   "AZURE_CLIENT_ID=${APP_CLIENT_ID}"
   "DATABASE_URL=secretref:database-url"
   "SHOPIFY_API_SECRET=secretref:shopify-api-secret"
+  "LOCK_DATABASE_URL=secretref:lock-database-url"
 )
 COMMON=(--resource-group "$RG" --environment my-app-env --image "$IMAGE" --registry-server myappregistry.azurecr.io)
 

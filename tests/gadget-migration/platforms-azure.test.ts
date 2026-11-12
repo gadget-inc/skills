@@ -192,7 +192,7 @@ describe("Container Apps checks", () => {
     const files = filesOf("azure-good");
     // the migration job reading the apps' secret instead of its own
     files["scripts/azure-apps.sh"] = files["scripts/azure-apps.sh"].replace('--env-vars "DATABASE_URL=secretref:migrate-database-url"', '--secrets "${SECRETS[@]}" --env-vars "DATABASE_URL=secretref:database-url"');
-    withApp(files, (dir) => assert.deepEqual(ids(dir, "azure/owner-skips-rls"), ["azure/owner-skips-rls scripts/azure-apps.sh:70"]));
+    withApp(files, (dir) => assert.deepEqual(ids(dir, "azure/owner-skips-rls"), ["azure/owner-skips-rls scripts/azure-apps.sh:73"]));
   });
 
   it("passes when the app and the migration job read different secrets, or every protected table forces row-level security", () => {

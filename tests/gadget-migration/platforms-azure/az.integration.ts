@@ -61,7 +61,7 @@ for run in "staging 0" "production 1"; do
   set -- $run
   env=$1 pass=$2
   SHOW_OK=$pass DB_ADMIN_PASSWORD=x bash scripts/azure-env.sh "$env" > /dev/null || { echo "azure-env.sh $env failed"; exit 1; }
-  SHOW_OK=$pass CREATE_SCHEDULED_JOBS=$pass bash scripts/azure-apps.sh "$env" v42 1a 2b 3c > /dev/null || { echo "azure-apps.sh $env failed"; exit 1; }
+  SHOW_OK=$pass CREATE_SCHEDULED_JOBS=$pass bash scripts/azure-apps.sh "$env" v42 1a 2b 3c 4d > /dev/null || { echo "azure-apps.sh $env failed"; exit 1; }
   SHOW_OK=$pass bash scripts/deploy.sh "$env" v43 > /dev/null || { echo "deploy.sh $env failed"; exit 1; }
 done
 [ -s /w/failures.log ] && exit 1

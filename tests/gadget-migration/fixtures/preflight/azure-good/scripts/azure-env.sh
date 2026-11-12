@@ -102,7 +102,7 @@ grant_secret() {
     echo "store $2 in $VAULT, then run this script again"
   fi
 }
-for secret in database-url shopify-api-secret; do grant_secret "$APP_PRINCIPAL" "$secret"; done
+for secret in database-url lock-database-url shopify-api-secret; do grant_secret "$APP_PRINCIPAL" "$secret"; done
 grant_secret "$MIGRATE_PRINCIPAL" migrate-database-url
 
 echo "outbound address: $EGRESS_IP. Add it to Shopify's IP allowlist next to Gadget's ASN 396982."

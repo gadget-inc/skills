@@ -53,7 +53,7 @@ Three checks need the host itself:
 
 - **Redis eviction:** `redis-cli -u "$REDIS_URL" CONFIG GET maxmemory-policy` should print `noeviction`. Managed Redis that disables `CONFIG` shows it in its settings instead.
 - **The egress address:** run `curl -s https://checkip.amazonaws.com` on the host, such as in a one-off job. If the host gives you fixed outbound addresses, add them to Shopify's IP allowlist as addresses next to Gadget's ASN, `396982`, and skip the ASN. Only when it doesn't, find the address's network with `whois -h whois.cymru.com " -v <address>"` (plain `whois` leaves the ASN empty for AWS addresses) and add that ASN and the country, as [IP allowlists](https://docs.gadget.dev/guides/moving-to-another-platform#ip-allowlists) explains.
-- **The deployed app's environment:** compare `ggt var list` with the host's variable names before the switch. A worker or job runner that imports `shopify.server.ts` needs `SHOPIFY_API_KEY` and `SHOPIFY_APP_URL` too, or it fails at startup.
+- **The deployed app's environment:** compare `ggt var list` with the host's variable names before the switch. A worker or job that imports `shopify.server.ts` fails at startup without `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SCOPES`, and `SHOPIFY_APP_URL`.
 
 ## Failure signatures
 
@@ -73,7 +73,7 @@ Three checks need the host itself:
 | `IMPORTANT! Eviction policy is allkeys-lru. It should be "noeviction"` in the BullMQ log | Redis deletes keys when full, and queued jobs vanish without an error | Set `maxmemory-policy noeviction` |
 | `OOM command not allowed when used memory > 'maxmemory'` | Redis with `noeviction` is full | Expected with `noeviction`: the add fails loudly and can retry. Add memory |
 | `job stalled more than allowable limit` | A worker was killed mid-job more than `maxStalledCount` times, usually by deploys | Close workers on `SIGTERM` and give the host a drain time longer than your longest job |
-| `Detected an empty appUrl configuration`, then `Missing values for: apiKey` | A process that imports `shopify.server.ts` is missing `SHOPIFY_APP_URL` or `SHOPIFY_API_KEY` | Set the Shopify variables on every service that runs the image |
+| `Detected an empty appUrl configuration`, or `Missing values for: apiKey` or `apiSecretKey` | A process that imports `shopify.server.ts` lacks `SHOPIFY_APP_URL`, `SHOPIFY_API_KEY`, or `SHOPIFY_API_SECRET` | Set the Shopify variables on every service that runs the image |
 | `403` from Shopify's Admin API after enforcement | The IP allowlist has neither the host's fixed address nor its network and country | Add the host's fixed outbound addresses, or its ASN and country when it has none, or run the job on the host |
 
 ## Complete examples

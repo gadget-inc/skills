@@ -2,11 +2,11 @@
 
 ## What is this?
 
-On Cloudflare the app runs as a Worker, a function Cloudflare starts for each request or event, with Workflows and Queues for background actions, Cron Triggers for scheduled actions, and R2 for files. Its database is either D1, Cloudflare's SQLite database, or Postgres outside Cloudflare reached through Hyperdrive. The guide's [Use D1](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#use-d1) and the table before it give the trade-off. Each Wrangler environment, such as `staging`, deploys as a separate Worker with its own bindings, the objects through which a Worker reaches those services. Gadget's guide: https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare
+On Cloudflare the app runs as a Worker, a function Cloudflare starts for each request or event, with Workflows and Queues for background actions, Cron Triggers for scheduled actions, and R2 for files. Its database is either D1, Cloudflare's SQLite database, or Postgres outside Cloudflare reached through Hyperdrive. Each Wrangler environment, such as `staging`, deploys as a separate Worker with its own bindings, its handles to those services.
 
 This file's examples use Hyperdrive, and the D1 note under "Complete examples" says what changes. Checks and failure rows marked **Hyperdrive** or **D1** apply to that database only.
 
-For Cloudflare itself (product choice, bindings, Wrangler commands and config), load Cloudflare's `cloudflare` and `wrangler` skills: in Claude Code, `/plugin marketplace add cloudflare/skills` then `/plugin install cloudflare@cloudflare`; elsewhere, `npx skills add https://github.com/cloudflare/skills`. That skill prefers the `cf` CLI for new projects; with this file's `wrangler.jsonc`, use Wrangler. This file covers only what breaks or changes because the app came from Gadget.
+For Cloudflare itself (product choice, bindings, Wrangler commands and config), load Cloudflare's `cloudflare` and `wrangler` skills: in Claude Code, `/plugin marketplace add cloudflare/skills` then `/plugin install cloudflare@cloudflare`; elsewhere, `npx skills add https://github.com/cloudflare/skills`. That skill prefers the `cf` CLI for new projects; with this file's `wrangler.jsonc`, use Wrangler.
 
 Read [common.md](common.md) first.
 
@@ -64,7 +64,7 @@ Every row was reproduced locally with Wrangler 4.160.0, with the Cloudflare Vite
 | `D1_ERROR: no such function: set_config at offset 7: SQLITE_ERROR`, and the same for `current_setting`, `pg_try_advisory_xact_lock`, `now`, and `any` | **D1.** Postgres functions, and `= any(?)` | `where shop_id = ?` in each query, a `ShopGate` lease for a lock, `in (?, ?)`, and a time bound from code |
 | `D1_ERROR: unrecognized token: ":" at offset 8: SQLITE_ERROR`, the same with `"@"` or `"#"`, and `D1_ERROR: near "ilike": syntax error` | **D1.** A `::` cast, the jsonb operators `@>` and `#>>`, and `ilike` | `cast(x as integer)`, `json_extract`, and `like` |
 | `near "(": syntax error at offset 65: SQLITE_ERROR` from `wrangler d1 migrations apply` | **D1.** `default now()` in a migration | `default current_timestamp` |
-| `{ id: null }` from `insert ... returning id` | **D1.** A `bigserial primary key` column. SQLite takes the type and generates no values | `integer primary key` |
+| `{ id: null }` from `insert ... returning id` | **D1.** A `bigserial primary key` column. SQLite takes the type and generates no values | `id integer primary key autoincrement`. D1 has no `setval`, so after the first load insert and delete one row at `(select max(id) from widget) + 1000000`, or new ids continue from the largest loaded one |
 | `too many columns on shopify_order: SQLITE_ERROR` from `wrangler d1 execute` or `migrations apply`, after `D1_ERROR: ` through the binding | **D1.** A table with 101 columns. 100 worked | The fields the app reads as columns, the rest in one JSON column ([Use D1](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#use-d1)) |
 | `D1_ERROR: near ">": syntax error` from `order by embedding <=> ?` | **D1.** pgvector. SQLite accepted a `vector(1536)` column and stored the value as text | Vectorize ([Use D1](https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare#use-d1)) |
 | `Couldn't find a D1 DB with the name or binding 'my-app-db' in your wrangler.jsonc file.` | **D1.** `wrangler d1 migrations apply my-app-db` without `--env production`, when the binding is only inside environments | Add `--env production` |

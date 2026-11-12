@@ -332,7 +332,7 @@ const POSTGRES_ONLY: SqlRule[] = [
     pattern: /(?:^|[(,])\s*["`[]?[A-Za-z_]\w*["`\]]?\s+((?:small|big)?serial)\b/im,
     what: (m) => `a ${m[1]} column`,
     result: (m) => `SQLite takes ${m[1]} as a type name and generates no values, so an insert that leaves out the id stores null: insert ... returning id gave { id: null }`,
-    fix: "Declare the key as integer primary key, which SQLite fills in.",
+    fix: "Declare the key as id integer primary key autoincrement. D1 has no setval, so after the first load insert and delete one row at (select max(id) from widget) + 1000000; a plain integer primary key continues from the largest loaded id.",
     docs: `${GUIDE}#use-d1`,
   },
 ];
