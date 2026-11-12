@@ -1,0 +1,13 @@
+{
+  "name": "gadget-migration-auth-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-timeout=60000 \"*.integration.ts\""
+  },
+  "dependencies": {
+    "bcrypt": "5.1.1",
+    "bcryptjs": "3.0.3",
+    "better-auth": "1.7.18"
+  }
+}

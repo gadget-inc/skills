@@ -1,0 +1,16 @@
+{
+  "name": "gadget-migration-integration-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "pretest": "prisma generate --schema prisma/schema.prisma",
+    "test": "node --test \"*.integration.ts\""
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "bullmq": "5.81.5",
+    "drizzle-orm": "0.45.4",
+    "pg": "8.23.1",
+    "prisma": "6.19.3"
+  }
+}

@@ -28,7 +28,14 @@ More detail is a good thing, and using Gadget terminology when you know what you
 
 ## What's included?
 
-Reference documentation covering data modeling, actions, routes, access control, Shopify/BigCommerce integrations, React hooks, deployment, and more.
+- **gadget-best-practices:** reference documentation covering data modeling, actions, routes, access control, Shopify/BigCommerce integrations, React hooks, deployment, and more.
+- **gadget-migration:** moving a Gadget app to another platform. It includes an inventory script that lists everything a move has to replace, Shopify webhook, app proxy, and session token verification that runs on any JavaScript runtime, and tested patterns for shop tenancy, background jobs, webhook ordering, and the Shopify token handoff.
+
+```bash
+npx skills add gadget-inc/skills --skill gadget-migration
+```
+
+See [tests/README.md](./tests/README.md) for how the skill's code is tested.
 
 ## Contributing
 

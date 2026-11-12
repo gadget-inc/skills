@@ -1,0 +1,25 @@
+client_id = "0000000000000000"
+name = "sample-app"
+application_url = "https://sample-app.gadget.app/api/shopify/install-or-render"
+embedded = true
+
+[access_scopes]
+scopes = "read_orders,write_products"
+
+[webhooks]
+api_version = "2026-04"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/create", "orders/updated" ]
+  uri = "https://sample-app.gadget.app/api/webhooks/shopify"
+  include_fields = [ "id", "updated_at", "total_price" ]
+  filter = "financial_status:paid"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
+  uri = "https://sample-app.gadget.app/api/webhooks/shopify"
+
+[app_proxy]
+url = "https://sample-app.gadget.app/proxy"
+subpath = "sample"
+prefix = "apps"
