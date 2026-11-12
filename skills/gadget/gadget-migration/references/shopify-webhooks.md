@@ -139,7 +139,7 @@ if (changed) await client.query("insert into outbox (job_name, payload) values (
 
 This also stops echo loops, where your app writes to Shopify, Shopify sends the change back as a webhook, and the handler writes to Shopify again.
 
-Queue the job through the outbox in [actions-and-transactions.md](actions-and-transactions.md#a-job-that-must-never-be-lost), not with a `queue.add` after the commit. If that `add` failed, the retry would read the new status as the old one, find nothing changed, and never queue the job.
+Queue the job through the outbox in [actions-and-transactions.md](actions-and-transactions.md#a-job-that-must-never-be-lost), not with a `queue.add` after the commit, which loses the job when the `add` fails ([Queue jobs that depend on a change](https://docs.gadget.dev/guides/moving-to-another-platform#queue-jobs-that-depend-on-a-change)).
 
 If the Gadget app narrowed webhooks with `includeFields`, keep the same `include_fields` on the new subscriptions. `include_fields` narrows the payload. It doesn't stop deliveries: Shopify still sends a webhook when a field outside the list changes. The one exception is that Shopify drops a delivery whose narrowed payload is identical to another within a short window.
 
@@ -202,7 +202,7 @@ hooks: {
 
 Stores imported from Gadget already have a row with `state = 'installed'`, so their first visit writes no job. The drain in actions-and-transactions.md moves each row to your queue, where the worker runs the install code for an `install` job and the reinstall code for a `reinstall` job, with the store's id in `job.data.shopId`. The queue retries that work.
 
-Don't run the install code, or add its job to the queue, in `afterAuth` after the insert. Here is what that does: store 111222333 installs at 10:00, the insert commits, and adding its backfill job fails while Redis fails over, so `afterAuth` throws. At 10:55 the access token is within 5 minutes of expiry, so a token exchange runs `afterAuth` again. The insert finds the row, and the install code never runs again, so the store never gets its backfill. With the outbox, the `install` row from 10:00 waits until the drain reaches the queue.
+Don't run the install code, or add its job to the queue, in `afterAuth` after the insert, for the reason in [Queue jobs that depend on a change](https://docs.gadget.dev/guides/moving-to-another-platform#queue-jobs-that-depend-on-a-change). Here is what that does for an install: store 111222333 installs at 10:00, the insert commits, and adding its backfill job fails while Redis fails over, so `afterAuth` throws. At 10:55 the access token is within 5 minutes of expiry, so a token exchange runs `afterAuth` again. The insert finds the row, and the install code never runs again, so the store never gets its backfill. With the outbox, the `install` row from 10:00 waits until the drain reaches the queue.
 
 The `uninstall` action becomes the `app/uninstalled` webhook handler. Set `state = 'uninstalled'` there, which is what makes the next `afterAuth` for that store a reinstall. The template's own handler already deletes the store's sessions.
 

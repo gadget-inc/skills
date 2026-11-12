@@ -66,7 +66,7 @@ It also holds a database connection and its locks for as long as the remote call
 
 ## A job that must never be lost
 
-`onSuccess` and the "after the commit" line above share a gap: if the process dies between the commit and the `add`, the job is never queued. A job queued only when the write changed something has a wider gap. Any failed `add` loses it, because the retry finds the change already committed and decides not to queue. [shopify-webhooks.md](shopify-webhooks.md) has two such jobs, one for an order whose payment status changed and one for a store that installed the app. An `api.enqueue` inside a transactional `run` didn't have either gap, because Gadget saved the job with the transaction. To keep that, write the job into a table in the same transaction and have a worker move rows from the table to the queue:
+`onSuccess` and the "after the commit" line above share a gap: if the process dies between the commit and the `add`, the job is never queued. A job queued only when the write changed something has a wider gap: any failed `add` loses it, because the retry finds nothing to change ([Queue jobs that depend on a change](https://docs.gadget.dev/guides/moving-to-another-platform#queue-jobs-that-depend-on-a-change)). [shopify-webhooks.md](shopify-webhooks.md) has two such jobs, one for an order whose payment status changed and one for a store that installed the app. An `api.enqueue` inside a transactional `run` didn't have either gap, because Gadget saved the job with the transaction. To keep that, write the job into a table in the same transaction and have a worker move rows from the table to the queue:
 
 ```sql
 -- in db/migrations/outbox.sql
