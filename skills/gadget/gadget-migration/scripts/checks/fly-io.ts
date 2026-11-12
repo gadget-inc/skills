@@ -186,7 +186,7 @@ function configFindings(repo: Repo, { file, text, config }: FlyConfig, handlers:
       file,
       line: keyLine(processes, group),
       message: `The ${group} group starts with "${command}", which runs migrations every time one of its Machines starts${config.deploy?.release_command ? ", on top of release_command" : ""}. A webhook that wakes a Machine waits for them.`,
-      fix: 'Start it without migrations and without npm, so SIGTERM reaches Node, such as ./node_modules/.bin/react-router-serve ./build/server/index.js for web, and run migrations once per deploy with release_command = "npx prisma migrate deploy" under [deploy].',
+      fix: 'Start it with npm run start, and run migrations once per deploy with release_command = "npx prisma migrate deploy" under [deploy].',
       docs: `${GUIDE}#run-migrations-once-per-deploy`,
     });
   }

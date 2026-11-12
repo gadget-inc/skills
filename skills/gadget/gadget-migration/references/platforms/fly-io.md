@@ -91,8 +91,8 @@ kill_timeout = 300
   SCOPES = "write_products"
 
 [processes]
-  web = "./node_modules/.bin/react-router-serve ./build/server/index.js"
-  # both start without npm, so SIGTERM reaches the web server's and the worker's handlers
+  web = "npm run start"
+  # the worker bundle from common.md's build:worker
   worker = "node build/worker.js"
   # add this group in the cutover's "Move scheduled work" deploy, not before
   cron = "supercronic /app/crontab"
@@ -250,6 +250,6 @@ No Fly.io account was used, so nothing was deployed, and the commands in the che
 - The Dockerfile, crontab, and `build:worker` script were built with Docker on `node:22-alpine` (arm64), and `supercronic -test` passed on the crontab, with and without a `CRON_TZ` line. Without `tzdata`, `supercronic -test` printed `unknown time zone`. The amd64 Supercronic download was built under emulation; Fly.io's remote builders weren't tried.
 - With the tests in `tests/gadget-migration/platforms-fly-io`: a web server with common.md's queue module was still running 5 seconds after `SIGTERM`, and exited in about 230 ms with common.md's handler, but not on `SIGINT`. A worker under `npm run` that only handles `SIGTERM` died at once on `SIGINT`. ioredis 5.8.1 failed with `getaddrinfo ENOTFOUND` on an IPv6-only Docker network, not Upstash, and connected with `family: 6`.
 - The `P2021` error and the rollback's `release_command` came from Prisma 6.19.3 on Postgres 18.6.
-- The `web` command, `react-router-serve` started from `node_modules/.bin`, wasn't run on Fly.io. Confirm on staging that a deploy doesn't pause about 5 minutes per web Machine.
+- In the Fly.io guide's Docker test on the template's image, npm 10.9.9 passed `SIGTERM` to the process it started, so `npm run start` lets the web server's shutdown handler run. A start command that drops the signal means no shutdown handler runs.
 
 From flyctl's source at the same commit, not run against the API: that `release_command` runs on the deployed image, the `fly mpg attach` error, the egress warning, and `fly launch` rewriting `shopify.app.toml` (in `@flydotio/dockerfile` 0.7.15, `fly.js`). From Fly.io's docs and the guide's fact-check only: the Writer role's grants and whether it bypasses row-level security, the 5-second default and 300-second maximum for `kill_timeout`, that `[env]` names can't start with `FLY_`, and the 64 Machines per egress pair.
