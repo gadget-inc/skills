@@ -135,3 +135,44 @@ console.log("ready");
     assert.equal(result.code, 0);
   });
 });
+
+// common.md's app/queues.server.ts: a webhook route's add through `connection` fails at once while Redis
+// is down, inside Shopify's 5 seconds, and one through a worker's connection keeps waiting.
+describe("adding a job while Redis is down", { skip: !dockerOk && "needs Docker" }, () => {
+  const name = "migcheck-fly-io-outage";
+  const port = 57280;
+  const dir = join(here, ".typecheck", "outage");
+  let queues: any;
+
+  before(async () => {
+    spawnSync("docker", ["rm", "-f", name]);
+    const started = spawnSync("docker", ["run", "-d", "--name", name, "-p", `127.0.0.1:${port}:6379`, "valkey/valkey:8"], { encoding: "utf8" });
+    assert.equal(started.status, 0, started.stderr);
+    for (let i = 0; i < 50 && spawnSync("docker", ["exec", name, "valkey-cli", "ping"], { encoding: "utf8" }).stdout.trim() !== "PONG"; i++) spawnSync("sleep", ["0.2"]);
+    mkdirSync(join(dir, "app"), { recursive: true });
+    writeFileSync(join(dir, "app/queues.server.ts"), block("common.md", "app/queues.server.ts"));
+    process.env.REDIS_URL = `redis://127.0.0.1:${port}`;
+    queues = await import(join(dir, "app/queues.server.ts"));
+  });
+
+  after(() => {
+    spawnSync("docker", ["rm", "-f", name]);
+  });
+
+  it("rejects the route's add at once, while a worker connection's add is still waiting after 5 seconds", async () => {
+    const { Queue } = await import("bullmq");
+    const worker = queues.workerConnection();
+    for (const c of [queues.connection, worker]) c.on("error", () => {}); // reconnect attempts while Redis is down
+    const workerSide = new Queue("external", { connection: worker });
+    await queues.externalQueue.add("before", {});
+    await workerSide.add("before", {});
+    spawnSync("docker", ["stop", "-t", "0", name]);
+    const startedAt = Date.now();
+    await assert.rejects(queues.externalQueue.add("during", {}));
+    assert.ok(Date.now() - startedAt < 1000, `took ${Date.now() - startedAt} ms`);
+    const waiting = await Promise.race([workerSide.add("during", {}).then(() => "added", () => "rejected"), new Promise((r) => setTimeout(() => r("still waiting"), 5000))]);
+    assert.equal(waiting, "still waiting");
+    queues.connection.disconnect();
+    worker.disconnect();
+  });
+});

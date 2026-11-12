@@ -97,7 +97,7 @@ export function appUrl(path: string): string {
 
 ### Run a BullMQ worker that drains on deploy
 
-Render, Railway, and Fly.io all stop a worker by sending `SIGTERM` and then killing it after a drain time you set. A worker that ignores the signal loses the jobs it holds, and BullMQ reruns them about 30 seconds later, or fails them with `job stalled more than allowable limit` once a job has stalled more than `maxStalledCount` times (1 by default). These three files run the queue, the worker, and the web server's half of the shutdown. They need `bullmq` and `ioredis` in `dependencies`; BullMQ 6 no longer installs ioredis itself.
+Render, Railway, and Fly.io all stop a worker by sending `SIGTERM` and then killing it after a drain time you set. A worker that ignores the signal loses the jobs it holds, and BullMQ reruns them about 30 seconds later, or fails them with `job stalled more than allowable limit` once a job has stalled more than `maxStalledCount` times (1 by default). These three files run the queue, the worker, and the web server's shutdown. They need `bullmq` and `ioredis` in `dependencies`; BullMQ 6 no longer installs ioredis itself.
 
 ```typescript
 // in app/queues.server.ts
@@ -105,8 +105,10 @@ import { Queue } from "bullmq";
 import IORedis from "ioredis";
 
 // family 0 tries IPv4 and IPv6, which private networks on Railway and Fly.io need.
-// BullMQ workers need maxRetriesPerRequest set to null.
-export const connection = new IORedis(process.env.REDIS_URL!, { family: 0, maxRetriesPerRequest: null });
+// for routes: add fails at once while Redis is down
+export const connection = new IORedis(process.env.REDIS_URL!, { family: 0, enableOfflineQueue: false, maxRetriesPerRequest: 1 });
+// workers need maxRetriesPerRequest: null, which waits for Redis
+export const workerConnection = () => new IORedis(process.env.REDIS_URL!, { family: 0, maxRetriesPerRequest: null });
 
 export const externalQueue = new Queue("external", {
   connection,
@@ -118,9 +120,10 @@ export const externalQueue = new Queue("external", {
 ```typescript
 // in app/worker.server.ts
 import { Worker } from "bullmq";
-import { connection } from "./queues.server";
+import { workerConnection } from "./queues.server";
 import { notifyExternalSystem } from "./services/external.server";
 
+const connection = workerConnection();
 const worker = new Worker("external", async (job) => await notifyExternalSystem(job.data.orderId), { connection, concurrency: 10 });
 
 worker.on("failed", (job, error) => console.error(`job ${job?.id} failed on attempt ${job?.attemptsMade}`, error));
@@ -142,8 +145,8 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 
 ```typescript
 // in app/entry.server.tsx
-// add to the template's entry file: react-router-serve closes its HTTP server on SIGTERM, but Node keeps
-// running while the Redis connection that webhook routes use to add jobs is open
+// add to the template's entry file: react-router-serve closes its HTTP server on SIGTERM,
+// but Node keeps running while the routes' Redis connection is open
 import { connection, externalQueue } from "./queues.server";
 
 process.once("SIGTERM", async () => {
@@ -152,7 +155,7 @@ process.once("SIGTERM", async () => {
 });
 ```
 
-Both handlers listen for `SIGTERM`. Fly.io sends `SIGINT` unless `fly.toml` sets `kill_signal = "SIGTERM"`, and without it the web server keeps waiting on its Redis connection until Fly.io kills it, as [fly-io.md](fly-io.md) shows.
+Both handlers listen for `SIGTERM`, which Fly.io sends only with `kill_signal = "SIGTERM"` ([fly-io.md](fly-io.md)).
 
 The worker's handler only runs if the signal reaches Node, so start the worker with `node` and a compiled file. pnpm didn't pass `SIGTERM` on in a test on `node:22-alpine`, and Node's Docker guidance warns that npm can swallow it. The template's Dockerfile installs production dependencies only and its TypeScript imports have no file extensions, so bundle the worker during the build with esbuild, listed under `dependencies`:
 
@@ -166,7 +169,7 @@ The worker's handler only runs if the signal reaches Node, so start the worker w
 }
 ```
 
-Then start the worker with `node build/worker.js`. `--packages=external` leaves `bullmq`, `@prisma/client`, and the rest to load from `node_modules` at runtime.
+Then start the worker with `node build/worker.js`. `--packages=external` loads the dependencies from `node_modules` at runtime.
 
 ### Load records through any pooler
 

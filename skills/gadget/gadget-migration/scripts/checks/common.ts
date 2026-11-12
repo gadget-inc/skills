@@ -413,9 +413,49 @@ function databaseFindings(repo: Repo): Finding[] {
   return findings;
 }
 
+// A queue that request handlers add to, built on a connection with maxRetriesPerRequest: null. That
+// setting makes each command wait for Redis, so during an outage a webhook's add outlasts Shopify's
+// 5 seconds instead of failing.
+const ROUTE = /(^|\/)app\/routes\//;
+function requestQueueFindings(repo: Repo): Finding[] {
+  if (!repo.dependencies().bullmq) return [];
+  const findings: Finding[] = [];
+  const files = repo.sourceFiles();
+  const resolve = (from: string, specifier: string) => {
+    const base = new URL(specifier, `file:///${from}`).pathname.slice(1).replace(/\.(js|mjs)$/, "");
+    return [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}/index.ts`].find((c) => repo.exists(c));
+  };
+  for (const file of files) {
+    const text = repo.read(file) ?? "";
+    if (!/new Queue\s*\(/.test(text) || !/maxRetriesPerRequest\s*:\s*null/.test(text)) continue;
+    const code = mask(text, false);
+    const blocking = new Set([...code.matchAll(/\b(?:const|let|var)\s+(\w+)\s*=\s*new\s+(?:IORedis|Redis)\s*\(([^;]*?maxRetriesPerRequest\s*:\s*null[^;]*)\)/g)].map((m) => m[1]));
+    for (const m of code.matchAll(/\b(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*new\s+Queue\s*\(/g)) {
+      const open = m.index! + m[0].length - 1;
+      const args = text.slice(open, closing(text, open) + 1);
+      const conn = /\bconnection\s*(?::\s*(\w+))?\s*[,}]/.exec(args);
+      if (!conn || !blocking.has(conn[1] ?? "connection")) continue;
+      const queue = m[1];
+      const route = ROUTE.test(file)
+        ? file
+        : files.find((f) => ROUTE.test(f) && [...(repo.read(f) ?? "").matchAll(/import\s*\{([^}]*)\}\s*from\s*["'](\.{1,2}\/[^"']+)["']/g)].some((i) => new RegExp(`\\b${queue}\\b`).test(i[1]) && resolve(f, i[2]) === file));
+      if (!route) continue;
+      findings.push({
+        id: "common/request-queue-blocking",
+        severity: "warning",
+        file,
+        line: lineAt(text, m.index!),
+        message: `${queue} adds jobs from ${route === file ? "this route" : route} through a connection with maxRetriesPerRequest: null, which waits for Redis to come back. During a Redis outage the add outlasts Shopify's 5-second webhook timeout instead of failing, and Shopify retries a webhook the handler may already have half done.`,
+        fix: `Give request handlers their own connection, { enableOfflineQueue: false, maxRetriesPerRequest: 1 }, and keep maxRetriesPerRequest: null for workers, as app/queues.server.ts in ${REF} does.`,
+      });
+    }
+  }
+  return findings;
+}
+
 export const common: CheckModule = {
   platform: "common",
   title: "Every host",
   detect: () => true,
-  run: (repo) => [...appUrlFindings(repo), ...prismaFindings(repo), ...dockerfileFindings(repo), ...workerFindings(repo), ...databaseFindings(repo)],
+  run: (repo) => [...appUrlFindings(repo), ...prismaFindings(repo), ...dockerfileFindings(repo), ...workerFindings(repo), ...requestQueueFindings(repo), ...databaseFindings(repo)],
 };

@@ -310,3 +310,24 @@ describe("common.md", () => {
     assert.match(pkg.scripts.build, /npm run build:worker/);
   });
 });
+
+describe("common/request-queue-blocking", () => {
+  const pkg = JSON.stringify({ dependencies: { bullmq: "5.58.0", ioredis: "5.8.2" } });
+  const shared = 'import { Queue } from "bullmq";\nimport IORedis from "ioredis";\nexport const connection = new IORedis(process.env.REDIS_URL!, { maxRetriesPerRequest: null });\nexport const externalQueue = new Queue("external", { connection });\n';
+  const route = 'import { externalQueue } from "../queues.server";\nexport const action = async () => {\n  await externalQueue.add("notify", {});\n  return new Response();\n};\n';
+  const found = (files: Record<string, string>) => {
+    let out: string[] = [];
+    withApp({ "package.json": pkg, ...files }, (dir) => (out = where(preflight(dir).findings.filter((f) => f.id === "common/request-queue-blocking"))));
+    return out;
+  };
+
+  it("warns when a route adds through a queue on the workers' blocking connection", () => {
+    assert.deepEqual(found({ "app/queues.server.ts": shared, "app/routes/webhooks.orders.create.tsx": route }), ["common/request-queue-blocking app/queues.server.ts:4"]);
+    assert.deepEqual(found({ "app/routes/webhooks.tsx": shared + route.split("\n").slice(1).join("\n") }), ["common/request-queue-blocking app/routes/webhooks.tsx:4"]);
+  });
+
+  it("says nothing for common.md's queues file, or a blocking queue that only a worker uses", () => {
+    assert.deepEqual(found({ "app/queues.server.ts": block("common.md", "app/queues.server.ts"), "app/routes/webhooks.orders.create.tsx": route }), []);
+    assert.deepEqual(found({ "app/queues.server.ts": shared, "app/worker.server.ts": 'import { externalQueue } from "./queues.server";\nvoid externalQueue;\n' }), []);
+  });
+});

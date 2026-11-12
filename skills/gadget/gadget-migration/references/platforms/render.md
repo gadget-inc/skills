@@ -195,8 +195,8 @@ The guide says to start each Render Workflows run from a queued job, because Ren
 
 ```typescript
 // in app/jobs/reconcile-all-shops.server.ts
-// connection is the ioredis connection from common.md's app/queues.server.ts
-import { connection } from "../queues.server";
+// from common.md's app/queues.server.ts
+import { connection, workerConnection } from "../queues.server";
 import { ClientError, Render } from "@renderinc/sdk";
 import { Queue, Worker } from "bullmq";
 
@@ -244,7 +244,7 @@ export function startWorkflowStartsWorker() {
         throw error;
       }
     },
-    { connection, concurrency: 5, limiter: { max: 40, duration: 60_000 } }
+    { connection: workerConnection(), concurrency: 5, limiter: { max: 40, duration: 60_000 } }
   );
   return worker;
 }

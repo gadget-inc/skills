@@ -57,7 +57,7 @@ before(async () => {
   mkdirSync(join(dir, "app/jobs"), { recursive: true });
   writeFileSync(
     join(dir, "app/queues.server.ts"),
-    `import IORedis from "ioredis";\nexport const connection = new IORedis({ port: ${PORT}, maxRetriesPerRequest: null });\n`
+    `import IORedis from "ioredis";\nexport const connection = new IORedis({ port: ${PORT}, maxRetriesPerRequest: null });\nexport const workerConnection = () => connection;\n`
   );
   const code = block("render.md", "app/jobs/reconcile-all-shops.server.ts")
     .replace('from "../queues.server"', 'from "../queues.server.ts"')
