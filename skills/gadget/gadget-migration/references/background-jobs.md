@@ -2,7 +2,7 @@
 
 ## What is this?
 
-Background actions are actions Gadget ran later, outside the request that queued them, with retries. Scheduled actions are global actions with a `scheduler` trigger. Both need a job queue and a scheduler on the new platform, and the queue has to support each `api.enqueue` option your app uses. The inventory script lists every `api.enqueue` call and the options it passes.
+Background actions are actions Gadget ran later, outside the request that queued them, with retries. Scheduled actions are global actions with a `scheduler` trigger. Both need a job queue and a scheduler on the new platform, and the queue has to support each `api.enqueue` option your app uses. The inventory script lists each `api.enqueue` call and its options.
 
 ## What each option did, and what replaces it
 
@@ -12,7 +12,7 @@ Background actions are actions Gadget ran later, outside the request that queued
 | `queue: { name, maxConcurrency }` | At most `maxConcurrency` jobs from that queue name at once: 1 by default, 100 at most | No per-key limit in the free version (see below) | `maxConcurrentDispatches`, per queue only | `concurrency: { limit, key }`, with `scope: "env"` and one key for every function on the same queue name | `concurrency: { perKey }` plus `concurrencyKey`, or one shared `queue({ concurrencyLimit })` for tasks on the same queue name |
 | `priority` | `high` before `default` before `low` | `priority: 1`, `2`, `3` on every job (see below) | None: use a separate queue | `priority: { run }`, an expression in seconds from -600 to 600 | `priority` when triggering, in seconds |
 | `startAt` | Runs at a future time | `delay` in ms | `scheduleTime` | `step.sleepUntil` | `delay` |
-| `id` with `onDuplicateID` | Throws `GGT_DUPLICATE_BACKGROUND_ACTION_ID` for a second job with the same id, or returns the first job with `onDuplicateID: "ignore"`, until 1 day after the first succeeds or 7 days after it fails or is cancelled | `deduplication: { id, ttl }` | Task name, reserved for up to 24 hours after the task finishes | Event `id`, for 24 hours | `idempotencyKey` with `idempotencyKeyTTL: "1d"` (the default is 30 days) |
+| `id` with `onDuplicateID` | Throws `GGT_DUPLICATE_BACKGROUND_ACTION_ID` for a second job with the same id, or returns the first job with `onDuplicateID: "ignore"`, until 1 day after the first succeeds or 7 days after it fails or is cancelled | `deduplication: { id, ttl }` | Task name, reserved for up to 24 hours after the task finishes | Event `id`, for 24 hours | `idempotencyKey` with `scope: "global"` and `idempotencyKeyTTL: "1d"` (default 30 days) |
 
 Three defaults to carry over on purpose:
 
