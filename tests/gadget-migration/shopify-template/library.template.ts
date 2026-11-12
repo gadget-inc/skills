@@ -305,11 +305,39 @@ describe("claimInstall from shopify-webhooks.md inside hooks.afterAuth", { skip:
   let pool: any;
   let app: any;
   let own: any;
-  let installs: bigint[] = [];
-  let reinstalls: bigint[] = [];
   let hookRuns = 0;
-  let failInstall = false;
   let claimInstall: Function;
+  let drainOutbox: Function;
+
+  // Stands in for the queue. Like BullMQ given a jobId, it drops a job whose id it already has.
+  // While `down` is above 0, each add throws, as during a Redis failover.
+  let queued: { id: string; name: string; data: any }[] = [];
+  let down = 0;
+  const add = async (name: string, data: any, { jobId }: { jobId: string }) => {
+    if (down > 0) {
+      down--;
+      throw new Error("connect ECONNREFUSED 127.0.0.1:6379");
+    }
+    if (!queued.some((job) => job.id === jobId)) queued.push({ id: jobId, name, data });
+  };
+
+  // The worker: the install code queues the store's backfill, as an install action that called api.shopifySync.run did.
+  let installs: string[] = [];
+  let reinstalls: string[] = [];
+  let worked = 0;
+  const installCode = (shopId: string) => add("backfill", { shopId }, { jobId: `backfill-${shopId}` });
+  // one pass of the drain timer from actions-and-transactions.md, which logs a failed drain and carries on, then of the worker
+  const tick = async () => {
+    await drainOutbox(pool, (job: any) => add(job.name, job.payload, { jobId: job.id })).catch(() => {});
+    for (; worked < queued.length; worked++) {
+      const job = queued[worked];
+      if (job.name === "install") {
+        installs.push(job.data.shopId);
+        await installCode(job.data.shopId);
+      }
+      if (job.name === "reinstall") reinstalls.push(job.data.shopId);
+    }
+  };
 
   before(async () => {
     const { default: pg } = await import("pg");
@@ -325,32 +353,29 @@ describe("claimInstall from shopify-webhooks.md inside hooks.afterAuth", { skip:
     // the columns of ShopifyShop in schema-mapping.md's Prisma schema
     await pool.query("create table shopify_shop (id bigint primary key, myshopify_domain text not null, state text not null default 'installed')");
 
-    const { blocks, importBlock } = await import("../integration/snippets.ts");
+    const { blocks, importBlock, sql } = await import("../integration/snippets.ts");
+    await pool.query(sql("actions-and-transactions.md", "db/migrations/outbox.sql"));
+    ({ drainOutbox } = await importBlock(sql("actions-and-transactions.md", "app/jobs/outbox.server.ts")));
     ({ claimInstall } = await importBlock(blocks("shopify-webhooks.md", "app/shopify/afterAuth.server.ts")[0]));
-    const handlers = {
-      onInstall: async (shopId: bigint) => {
-        installs.push(shopId);
-        if (failInstall) throw new Error("install code failed");
-      },
-      onReinstall: async (shopId: bigint) => void reinstalls.push(shopId),
-    };
     // wired the way the reference wires it in shopify.server.ts
     ({ app, storage: own } = makeApp({
       hooks: {
         afterAuth: ({ session, admin }: any) => {
           hookRuns++;
-          return claimInstall(pool, admin, session.shop, handlers);
+          return claimInstall(pool, admin, session.shop);
         },
       },
     }));
   });
 
   beforeEach(async () => {
+    queued = [];
+    down = 0;
     installs = [];
     reinstalls = [];
+    worked = 0;
     hookRuns = 0;
-    failInstall = false;
-    await pool.query("truncate shopify_shop");
+    await pool.query("truncate shopify_shop, outbox");
     await own.deleteSession(`offline_${SHOP}`);
     answerShopify();
   });
@@ -358,31 +383,36 @@ describe("claimInstall from shopify-webhooks.md inside hooks.afterAuth", { skip:
   after(() => pool?.end());
 
   const state = async () => (await pool.query("select id::text, myshopify_domain, state from shopify_shop")).rows;
+  const waiting = async () => (await pool.query("select count(*)::int as count from outbox")).rows[0].count;
 
   it("runs the install code once when two merchant requests exchange tokens at the same moment", async () => {
     await Promise.all([app.authenticate.admin(adminRequest()), app.authenticate.admin(adminRequest())]);
     // both requests exchanged a token and both ran the hook, and only one of them claimed the install
     assert.equal(exchanges(), 2);
     assert.equal(hookRuns, 2);
-    assert.deepEqual(installs, [SHOP_ID]);
+    await tick();
+    assert.deepEqual(installs, [String(SHOP_ID)]);
     assert.deepEqual(reinstalls, []);
     assert.deepEqual(await state(), [{ id: String(SHOP_ID), myshopify_domain: SHOP, state: "installed" }]);
   });
 
   it("runs the install code once across 20 hooks racing on one new store", async () => {
     const admin = { graphql: async () => Response.json({ data: { shop: { id: `gid://shopify/Shop/${SHOP_ID}` } } }) };
-    const handlers = { onInstall: async (shopId: bigint) => void installs.push(shopId), onReinstall: async (shopId: bigint) => void reinstalls.push(shopId) };
-    await Promise.all(Array.from({ length: 20 }, () => claimInstall(pool, admin, SHOP, handlers)));
-    assert.deepEqual(installs, [SHOP_ID]);
+    const claimed = await Promise.all(Array.from({ length: 20 }, () => claimInstall(pool, admin, SHOP)));
+    assert.deepEqual(claimed.filter(Boolean), ["install"]);
+    await tick();
+    assert.deepEqual(installs, [String(SHOP_ID)]);
     assert.deepEqual(reinstalls, []);
   });
 
-  it("runs neither handler for a store imported from Gadget, on its first visit or on a later token exchange", async () => {
+  it("runs neither for a store imported from Gadget, on its first visit or on a later token exchange", async () => {
     await pool.query("insert into shopify_shop (id, myshopify_domain, state) values ($1, $2, 'installed')", [String(SHOP_ID), SHOP]);
     await app.authenticate.admin(adminRequest());
     await storeMovedSession({ accessToken: "shpat_old", expires: minutes(4), refreshToken: "shprt_old", refreshTokenExpires: minutes(60 * 24 * 80) }, own);
     await app.authenticate.admin(adminRequest());
     assert.equal(hookRuns, 2);
+    assert.equal(await waiting(), 0);
+    await tick();
     assert.deepEqual(installs, []);
     assert.deepEqual(reinstalls, []);
   });
@@ -391,21 +421,31 @@ describe("claimInstall from shopify-webhooks.md inside hooks.afterAuth", { skip:
     await pool.query("insert into shopify_shop (id, myshopify_domain, state) values ($1, $2, 'uninstalled')", [String(SHOP_ID), SHOP]);
     await Promise.all([app.authenticate.admin(adminRequest()), app.authenticate.admin(adminRequest())]);
     assert.equal(hookRuns, 2);
+    await tick();
     assert.deepEqual(installs, []);
-    assert.deepEqual(reinstalls, [SHOP_ID]);
+    assert.deepEqual(reinstalls, [String(SHOP_ID)]);
     assert.equal((await state())[0].state, "installed");
   });
 
-  it("does not run the install code again after it threw, because the row was already claimed", async () => {
-    failInstall = true;
-    assert.equal(await statusOf(app.authenticate.admin(adminRequest())), 500);
-    assert.deepEqual(installs, [SHOP_ID]);
+  it("still queues the store's backfill when the queue fails once after the install committed", async () => {
+    down = 1; // 10:00, store 111222333 installs while Redis fails over
+    const statuses = [await statusOf(app.authenticate.admin(adminRequest()))];
+    await tick();
+    // 10:55, the stored token is within 5 minutes of expiry, so the next request exchanges a token and runs afterAuth again
+    await storeMovedSession({ accessToken: "shpat_new", expires: minutes(4), refreshToken: "shprt_new", refreshTokenExpires: minutes(60 * 24 * 90) }, own);
+    statuses.push(await statusOf(app.authenticate.admin(adminRequest())));
+    await tick();
 
-    failInstall = false;
-    await own.deleteSession(`offline_${SHOP}`);
-    await app.authenticate.admin(adminRequest());
     assert.equal(hookRuns, 2);
-    assert.deepEqual(installs, [SHOP_ID]); // still one: the next visit found the row
+    assert.deepEqual(
+      queued.map((job) => [job.name, job.data.shopId]),
+      [
+        ["install", String(SHOP_ID)],
+        ["backfill", String(SHOP_ID)],
+      ]
+    );
+    assert.equal(await waiting(), 0);
+    assert.deepEqual(statuses, ["resolved", "resolved"]); // neither merchant request failed
   });
 });
 

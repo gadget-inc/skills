@@ -1,9 +1,9 @@
-// Runs the SQL in references/shopify-webhooks.md against Postgres. See tests/README.md.
+// Runs the SQL and the changed-field block in references/shopify-webhooks.md against Postgres. See tests/README.md.
 import assert from "node:assert/strict";
-import { after, before, describe, it } from "node:test";
+import { after, before, beforeEach, describe, it } from "node:test";
 import type pg from "pg";
 import { scratchDatabase, skipWithoutDatabase as skip } from "./db.ts";
-import { sql } from "./snippets.ts";
+import { blocks, importBlock, sql } from "./snippets.ts";
 
 let admin: pg.Pool;
 
@@ -15,6 +15,7 @@ before(async () => {
     create table shopify_order_line_item (id bigint primary key, order_id bigint not null references shopify_order (id) on delete cascade);
   `);
   await admin.query(sql("shopify-webhooks.md", "db/migrations/processed_webhook.sql"));
+  await admin.query(sql("actions-and-transactions.md", "db/migrations/outbox.sql"));
 });
 
 after(async () => {
@@ -80,5 +81,91 @@ describe("shopify-webhooks.md", { skip }, () => {
     await assert.rejects(process("wh-1", true), /write failed/);
     assert.equal(await process("wh-1", false), "processed"); // the retry is not dropped
     assert.equal(await process("wh-1", false), "duplicate");
+  });
+
+  describe("the changed-field block, in a webhook job the queue retries", () => {
+    // The block runs as a function body with these names in scope, inside the job's transaction.
+    // `jobs` is the app's queue client, whose adds run after the commit, where the skill says to queue.
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    const changedField = () =>
+      new AsyncFunction("client", "orderId", "values", "payload", "upsertOrderFromWebhook", "jobs", blocks("shopify-webhooks.md", "app/jobs/handleOrderUpdated.server.ts")[0]);
+    let drainOutbox: Function;
+
+    // Stands in for the queue. Like BullMQ given a jobId, it drops a job whose id it already has.
+    // While `down` is above 0, each add throws, as during a Redis failover.
+    let queued: { id: string; name: string; data: any }[] = [];
+    let down = 0;
+    const add = async (name: string, data: any, { jobId }: { jobId: string }) => {
+      if (down > 0) {
+        down--;
+        throw new Error("connect ECONNREFUSED 127.0.0.1:6379");
+      }
+      if (!queued.some((job) => job.id === jobId)) queued.push({ id: jobId, name, data });
+    };
+
+    type Payload = { id: number; total_price: string; financial_status: string; updated_at: string };
+    const attempt = async (payload: Payload) => {
+      const afterCommit: (() => Promise<unknown>)[] = [];
+      const jobs = { add: async (...args: [string, any, { jobId: string }]) => void afterCommit.push(() => add(...args)) };
+      const client = await admin.connect();
+      try {
+        await client.query("begin");
+        const values = [payload.id, 1, payload.total_price, payload.financial_status, payload.updated_at];
+        await changedField()(client, payload.id, values, payload, webhookUpsert(), jobs);
+        await client.query("commit");
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      } finally {
+        client.release();
+      }
+      for (const run of afterCommit) await run();
+    };
+    // the webhook queue's 10 attempts
+    const processWebhook = async (payload: Payload) => {
+      for (let tries = 1; ; tries++) {
+        try {
+          return await attempt(payload);
+        } catch (error) {
+          if (tries === 10) throw error;
+        }
+      }
+    };
+    // one pass of the drain timer from actions-and-transactions.md, which logs a failed drain and carries on
+    const tick = () => drainOutbox(admin, (job: any) => add(job.name, job.payload, { jobId: job.id })).catch(() => {});
+    const waiting = async () => (await admin.query("select count(*)::int as count from outbox")).rows[0].count;
+
+    before(async () => {
+      ({ drainOutbox } = await importBlock(sql("actions-and-transactions.md", "app/jobs/outbox.server.ts")));
+    });
+
+    beforeEach(async () => {
+      queued = [];
+      down = 0;
+      await admin.query("truncate outbox");
+    });
+
+    it("still queues the job when the write changes the field and the queue fails once after the commit", async () => {
+      await write(webhookUpsert(), [20, 1, "30.00", "pending", "2026-11-08T10:00:00Z"]);
+      down = 1; // Redis fails over as the paid webhook arrives
+      await processWebhook({ id: 20, total_price: "30.00", financial_status: "paid", updated_at: "2026-11-08T10:05:00Z" });
+      await tick();
+      await tick();
+      assert.deepEqual(
+        queued.map((job) => [job.name, String(job.data.orderId)]),
+        [["orderPaid", "20"]]
+      );
+      assert.equal(await waiting(), 0);
+    });
+
+    it("queues nothing when the payload leaves the field as it was, or is stale", async () => {
+      await write(webhookUpsert(), [21, 1, "30.00", "paid", "2026-11-08T10:00:00Z"]);
+      await processWebhook({ id: 21, total_price: "25.00", financial_status: "paid", updated_at: "2026-11-08T10:05:00Z" }); // newer, same status
+      await processWebhook({ id: 21, total_price: "30.00", financial_status: "pending", updated_at: "2026-11-08T09:59:00Z" }); // older, arrived late
+      await tick();
+      assert.deepEqual(queued, []);
+      assert.equal(await waiting(), 0);
+      assert.deepEqual(await stored(21), { total_price: "25.00", financial_status: "paid" });
+    });
   });
 });

@@ -66,7 +66,7 @@ It also holds a database connection and its locks for as long as the remote call
 
 ## A job that must never be lost
 
-`onSuccess` and the "after the commit" line above share a gap: if the process dies between the commit and the `add`, the job is never queued. An `api.enqueue` inside a transactional `run` didn't have that gap, because Gadget saved the job with the transaction. To keep that, write the job into a table in the same transaction and have a worker move rows from the table to the queue:
+`onSuccess` and the "after the commit" line above share a gap: if the process dies between the commit and the `add`, the job is never queued. A job queued only when the write changed something has a wider gap: any failed `add` loses it, because the retry finds nothing to change ([Queue jobs that depend on a change](https://docs.gadget.dev/guides/moving-to-another-platform#queue-jobs-that-depend-on-a-change)). [shopify-webhooks.md](shopify-webhooks.md) has two such jobs, one for an order whose payment status changed and one for a store that installed the app. An `api.enqueue` inside a transactional `run` didn't have either gap, because Gadget saved the job with the transaction. To keep that, write the job into a table in the same transaction and have a worker move rows from the table to the queue:
 
 ```sql
 -- in db/migrations/outbox.sql
@@ -129,7 +129,7 @@ The `jobId` is what drops the repeat, so don't set `removeOnComplete: true` on t
 | Gadget | Replacement |
 |---|---|
 | `applyParams`, `save` | Inserts and updates in your database client. `save` also ran the field validations, which are now constraints or checks in code ([schema-mapping.md](schema-mapping.md)) |
-| `record.changed("field")`, `record.changes()` | Lock and read the stored row, then compare it with the new values before writing ([shopify-webhooks.md](shopify-webhooks.md) has the pattern) |
+| `record.changed("field")`, `record.changes()` | Lock and read the stored row, compare it with the new values before writing, and write any job the comparison decides on to the outbox above ([shopify-webhooks.md](shopify-webhooks.md) has the pattern) |
 | `trigger.type`, such as `api`, `shopify_webhook`, `shopify_webhook_reconciliation`, `shopify_sync`, `scheduler`, `background-action` | Pass a `source` argument into the function if the code branches on it |
 | `api.internal.<model>` | Database queries inside the same transaction. Port each `findMany` with three things Gadget did: `notEquals` also matched null, so use `is distinct from`; Gadget added `id` as the last sort key, so end the `order by` with `id`; and it returned 50 records unless `first` was passed. [frontend.md](frontend.md#three-things-gadget-did-on-every-read) has a query where `<>` returns 6 rows and Gadget returned 8 |
 | `api.<model>.<action>()` from another action | A call to that action's new function. On Gadget it ran in its own transaction; decide whether it should share the caller's now |
@@ -162,7 +162,7 @@ Routes had no transaction unless the code opened one with `api.transaction`, and
 - **Outside calls inside the transaction.** They can't be rolled back, and they hold connections open.
 - **Prisma's 5-second default timeout.** Transactions Gadget allowed 8 seconds for fail with `Transaction already closed`.
 - **Assuming a called action shares the transaction.** On Gadget, `api.<model>.<action>()` committed on its own. Port the behavior you actually had.
-- **Moving an `api.enqueue` out of `run` without the outbox.** Inside a transactional `run` it committed with the writes. After the commit, a crash in between loses the job.
+- **Moving an `api.enqueue` out of `run` without the outbox.** Inside a transactional `run` it committed with the writes. After the commit, a crash in between loses the job, and if the job depends on what the write changed, so does a failed `add`.
 - **Dropping `trigger` checks.** An action that skipped work for `shopify_sync` will do it for every backfilled record if the check disappears.
 - **Dropping the timeout.** A Gadget action stopped at 15 seconds unless `timeoutMS` said otherwise. A plain function waits on a stuck remote call for as long as the socket stays open.
 

@@ -18,7 +18,7 @@ Three defaults to carry over on purpose:
 
 - **A `retries` object without `retryCount` retried 10 times, not 6.** `retries: 3` and no `retries` at all used the 1-second doubling schedule. An object could also set `initialInterval`, `maxInterval`, `backoffFactor`, and `randomizeInterval`.
 - **A job with no `queue` had no limit of its own.** Gadget only capped the total an environment ran at once. On the new platform the worker's concurrency is that cap, and you have to pick it.
-- **`api.enqueue` inside a transactional `run` was part of the transaction.** If `run` threw, the job was never queued. A `queue.add` call inside your new transaction is not undone by a rollback. Queue after the commit, or use the outbox table in [actions-and-transactions.md](actions-and-transactions.md).
+- **`api.enqueue` inside a transactional `run` was part of the transaction.** If `run` threw, the job was never queued. A `queue.add` call inside your new transaction is not undone by a rollback. Queue after the commit, or use the outbox table in [actions-and-transactions.md](actions-and-transactions.md#a-job-that-must-never-be-lost). A job queued only when the write changed something needs the outbox: if its `add` fails after the commit, the retry finds nothing left to change and never queues it.
 
 The BullMQ column was run against BullMQ 5.81, and the Inngest snippet below against the Inngest dev server with SDK 4.26. The Cloud Tasks and Trigger.dev columns follow their documentation; check the option names against the version you install.
 
