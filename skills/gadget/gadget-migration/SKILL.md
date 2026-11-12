@@ -42,6 +42,7 @@ Read the platform's reference alongside the steps. Each has checks to run, the e
 | Fly.io | [references/platforms/fly-io.md](references/platforms/fly-io.md) | `fly` in [superfly/skills](https://github.com/superfly/skills) |
 | Google Cloud: Cloud Run, Cloud Tasks, Cloud SQL | [references/platforms/google-cloud.md](references/platforms/google-cloud.md) | `cloud-run-basics`, `cloud-sql-basics` in [google/skills](https://github.com/google/skills) |
 | AWS: ECS on Fargate, RDS, SQS, EventBridge Scheduler | [references/platforms/aws.md](references/platforms/aws.md) | `aws-containers`, `aws-database`, `aws-messaging-and-streaming` in [aws/agent-toolkit-for-aws](https://github.com/aws/agent-toolkit-for-aws) |
+| Azure: Container Apps, Service Bus, Flexible Server | [references/platforms/azure.md](references/platforms/azure.md) | `azure-messaging`, `azure-storage` in [microsoft/azure-skills](https://github.com/microsoft/azure-skills) |
 | Supabase | [references/platforms/supabase.md](references/platforms/supabase.md) | `supabase` in [supabase/agent-skills](https://github.com/supabase/agent-skills) |
 | Cloudflare Workers, Hyperdrive, Workflows | [references/platforms/cloudflare.md](references/platforms/cloudflare.md) | `cloudflare`, `wrangler` in [cloudflare/skills](https://github.com/cloudflare/skills) |
 | Hookdeck for Shopify webhooks | [references/platforms/hookdeck.md](references/platforms/hookdeck.md) | `event-gateway` in [hookdeck/agent-skills](https://github.com/hookdeck/agent-skills) |
@@ -85,7 +86,7 @@ Plan around these. They are true today and may change:
 ## Files in this skill
 
 - `scripts/inventory.ts`: the inventory above
-- `scripts/preflight.ts`: checks the new app's code and config (`render.yaml`, `fly.toml`, `wrangler.jsonc`, `vercel.json`, `.railway/railway.ts`, the Dockerfile, Prisma migrations, Supabase migrations, Inngest and Trigger.dev code) for the pitfalls in `references/platforms/`, with the error each one causes and its fix. Node 22.18+ or 23.6+, no dependencies: `node scripts/preflight.ts path/to/new-app`
+- `scripts/preflight.ts`: checks the new app's code and config (`render.yaml`, `fly.toml`, `wrangler.jsonc`, `vercel.json`, `.railway/railway.ts`, ECS task definitions, `gcloud`, `aws`, and `az` scripts, the Dockerfile, Prisma migrations, Supabase migrations, Inngest and Trigger.dev code) for the pitfalls in `references/platforms/`, with the error each one causes and its fix. Node 22.18+ or 23.6+, no dependencies: `node scripts/preflight.ts path/to/new-app`
 - `scripts/db-check.sql`: run with `psql "$DATABASE_URL" -f scripts/db-check.sql` as the app's own role. It reports a role that skips row-level security, tables it owns, tables with no policy for it, pgvector it can't reach, a pooler in the way, and the connection limit.
 - `assets/shopify-signatures.ts`: webhook HMAC, OAuth `hmac`, app proxy `signature`, and session token verification with Web Crypto only. Copy it into the new app unchanged.
 - `assets/bigcommerce-signed-payload.ts`: verifies BigCommerce's `signed_payload_jwt` with Web Crypto only.

@@ -19,8 +19,9 @@ import { hookdeck } from "./checks/hookdeck.ts";
 import { inngest } from "./checks/inngest.ts";
 import { triggerDev } from "./checks/trigger-dev.ts";
 import { aws } from "./checks/aws.ts";
+import { azure } from "./checks/azure.ts";
 
-export const MODULES: CheckModule[] = [common, vercel, render, railway, flyIo, googleCloud, aws, supabase, cloudflare, hookdeck, inngest, triggerDev];
+export const MODULES: CheckModule[] = [common, vercel, render, railway, flyIo, googleCloud, aws, azure, supabase, cloudflare, hookdeck, inngest, triggerDev];
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "build", "dist", ".react-router", ".cache", ".next", ".vercel", ".wrangler", ".gadget", "coverage", ".turbo"]);
 const SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$/;

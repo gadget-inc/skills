@@ -12,6 +12,7 @@ Gadget's guides for each platform repeat a handful of mistakes, because they hap
 | Fly.io | [fly-io.md](fly-io.md) | https://docs.gadget.dev/guides/moving-to-another-platform/fly-io |
 | Google Cloud | [google-cloud.md](google-cloud.md) | https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud |
 | AWS | [aws.md](aws.md) | https://docs.gadget.dev/guides/moving-to-another-platform/aws |
+| Azure | [azure.md](azure.md) | https://docs.gadget.dev/guides/moving-to-another-platform/azure |
 | Supabase | [supabase.md](supabase.md) | https://docs.gadget.dev/guides/moving-to-another-platform/supabase |
 | Cloudflare Workers | [cloudflare.md](cloudflare.md) | https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare |
 | Hookdeck for webhooks | [hookdeck.md](hookdeck.md) | https://docs.gadget.dev/guides/moving-to-another-platform/hookdeck |

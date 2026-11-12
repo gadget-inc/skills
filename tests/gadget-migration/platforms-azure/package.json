@@ -1,0 +1,24 @@
+{
+  "name": "gadget-migration-platforms-azure-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "pretest": "prisma generate --schema prisma/schema.prisma",
+    "test": "node --test --test-timeout=1800000 \"*.integration.ts\""
+  },
+  "dependencies": {
+    "@azure/identity": "4.14.1",
+    "@azure/service-bus": "7.10.0",
+    "@azure/storage-blob": "12.34.0",
+    "@prisma/client": "6.19.3",
+    "@shopify/shopify-app-react-router": "3.0.2",
+    "@types/node": "25.5.2",
+    "@types/pg": "8.15.6",
+    "pg": "8.23.1",
+    "prisma": "6.19.3",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-router": "7.18.2",
+    "typescript": "5.9.3"
+  }
+}
