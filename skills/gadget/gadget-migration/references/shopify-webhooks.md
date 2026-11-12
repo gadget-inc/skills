@@ -132,11 +132,13 @@ Gadget actions often checked `record.changed("financialStatus")` before doing wo
 const before = await client.query("select financial_status from shopify_order where id = $1 for update", [orderId]);
 const written = await client.query(upsertOrderFromWebhook, values);
 const changed = written.rowCount === 1 && before.rows[0]?.financial_status !== payload.financial_status;
-// the timestamp in the id lets a second payment after a refund queue its own job
-if (changed) await jobs.add("orderPaid", { orderId }, { jobId: `order-paid-${orderId}-${payload.updated_at}` });
+// the outbox row commits with the write: a retry after the commit finds the status already changed and queues nothing
+if (changed) await client.query("insert into outbox (job_name, payload) values ('orderPaid', $1)", [{ orderId: String(orderId) }]);
 ```
 
 This also stops echo loops, where your app writes to Shopify, Shopify sends the change back as a webhook, and the handler writes to Shopify again.
+
+Queue the job through the outbox in [actions-and-transactions.md](actions-and-transactions.md#a-job-that-must-never-be-lost), not with a `queue.add` after the commit. If that `add` failed, the retry would read the new status as the old one, find nothing changed, and never queue the job.
 
 If the Gadget app narrowed webhooks with `includeFields`, keep the same `include_fields` on the new subscriptions. `include_fields` narrows the payload. It doesn't stop deliveries: Shopify still sends a webhook when a field outside the list changes. The one exception is that Shopify drops a delivery whose narrowed payload is identical to another within a short window.
 
