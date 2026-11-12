@@ -30,7 +30,7 @@ DATABASE_URL=postgres://postgres@127.0.0.1:5432/postgres REDIS_URL=redis://127.0
 
 `PGBOUNCER_PORT` changes the pooler's port (default 64352).
 
-Shopify's app library, from `gadget-migration/shopify-template`, against a local stand-in for Shopify. The tests that run the install code from `references/shopify-webhooks.md` inside the library's `afterAuth` hook need Postgres and skip without `DATABASE_URL`:
+Shopify's app library, from `gadget-migration/shopify-template`, against a local stand-in for Shopify. The tests that run `claimInstall` from `references/shopify-webhooks.md` inside the library's `afterAuth` hook, and drain its jobs with the outbox code from `references/actions-and-transactions.md`, need Postgres and skip without `DATABASE_URL`:
 
 ```bash
 cd tests/gadget-migration/shopify-template

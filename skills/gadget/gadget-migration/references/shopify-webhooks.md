@@ -152,38 +152,56 @@ Gadget ran the `shopifyShop` `install` action once per store and `reinstall` whe
 
 Here is what porting install code into it unchanged does. An app on 300 stores sends a welcome email from `install`. After the move, no store has a session in the new app, so the first visit from each of the 300 merchants runs `afterAuth` and sends the email again. It runs again on any later visit that finds the stored token within 5 minutes of expiry.
 
-So `afterAuth` asks your own table what happened, and one insert claims the install:
+So `afterAuth` asks your own table what happened. One statement claims the install and, only when it added the row, writes an `install` job to the outbox from [actions-and-transactions.md](actions-and-transactions.md#a-job-that-must-never-be-lost), so the job commits with the claim:
 
 ```typescript
 // in app/shopify/afterAuth.server.ts
 import type { Pool } from "pg";
 
 type Admin = { graphql: (query: string) => Promise<Response> };
-type Handlers = { onInstall: (shopId: bigint) => Promise<void>; onReinstall: (shopId: bigint) => Promise<void> };
 
 // Call from hooks.afterAuth, which runs after every token exchange and not only on install.
-export async function claimInstall(pool: Pool, admin: Admin, shop: string, handlers: Handlers) {
+// Returns the job it wrote to the outbox, or null.
+export async function claimInstall(pool: Pool, admin: Admin, shop: string): Promise<"install" | "reinstall" | null> {
   // the session names the store by domain, and shopify_shop is keyed on Shopify's shop id, as on Gadget
   const { data } = await (await admin.graphql("{ shop { id } }")).json();
   const shopId = BigInt(data.shop.id.split("/").pop()); // gid://shopify/Shop/111222333
 
-  // two requests can exchange tokens at the same moment: only one of them inserts the row
-  const inserted = await pool.query("insert into shopify_shop (id, myshopify_domain, state) values ($1, $2, 'installed') on conflict (id) do nothing", [String(shopId), shop]);
-  if (inserted.rowCount === 1) return handlers.onInstall(shopId);
+  // two requests can exchange tokens at the same moment: only one of them inserts the row.
+  // The outbox row is in the same statement, so it commits with the claim or not at all
+  const installed = await pool.query(
+    `with claimed as (
+       insert into shopify_shop (id, myshopify_domain, state) values ($1, $2, 'installed')
+       on conflict (id) do nothing
+       returning id
+     )
+     insert into outbox (job_name, payload) select 'install', jsonb_build_object('shopId', id::text) from claimed`,
+    [String(shopId), shop]
+  );
+  if (installed.rowCount === 1) return "install";
 
-  const returned = await pool.query("update shopify_shop set state = 'installed' where id = $1 and state = 'uninstalled'", [String(shopId)]);
-  if (returned.rowCount === 1) await handlers.onReinstall(shopId);
+  const reinstalled = await pool.query(
+    `with claimed as (
+       update shopify_shop set state = 'installed' where id = $1 and state = 'uninstalled'
+       returning id
+     )
+     insert into outbox (job_name, payload) select 'reinstall', jsonb_build_object('shopId', id::text) from claimed`,
+    [String(shopId)]
+  );
+  return reinstalled.rowCount === 1 ? "reinstall" : null;
 }
 ```
 
 ```typescript
 // in app/shopify.server.ts, inside shopifyApp({ ... })
 hooks: {
-  afterAuth: ({ session, admin }) => claimInstall(pool, admin, session.shop, { onInstall, onReinstall }),
+  afterAuth: ({ session, admin }) => claimInstall(pool, admin, session.shop),
 },
 ```
 
-Stores imported from Gadget already have a row with `state = 'installed'`, so their first visit runs neither handler. The insert commits before `onInstall` runs, so an `onInstall` that throws is not run again on the next visit. Have it queue one job and let the queue retry the work.
+Stores imported from Gadget already have a row with `state = 'installed'`, so their first visit writes no job. The drain in actions-and-transactions.md moves each row to your queue, where the worker runs the install code for an `install` job and the reinstall code for a `reinstall` job, with the store's id in `job.data.shopId`. The queue retries that work.
+
+Don't run the install code, or add its job to the queue, in `afterAuth` after the insert. Here is what that does: store 111222333 installs at 10:00, the insert commits, and adding its backfill job fails while Redis fails over, so `afterAuth` throws. At 10:55 the access token is within 5 minutes of expiry, so a token exchange runs `afterAuth` again. The insert finds the row, and the install code never runs again, so the store never gets its backfill. With the outbox, the `install` row from 10:00 waits until the drain reaches the queue.
 
 The `uninstall` action becomes the `app/uninstalled` webhook handler. Set `state = 'uninstalled'` there, which is what makes the next `afterAuth` for that store a reinstall. The template's own handler already deletes the store's sessions.
 
