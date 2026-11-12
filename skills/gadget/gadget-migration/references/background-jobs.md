@@ -34,7 +34,7 @@ Code that read `trigger.attemptNumber` or `trigger.finalAttempt` needs the queue
 
 A background action stopped at the action's timeout: 15 seconds by default on framework 1.4 and later, 3 minutes before that, and whatever `timeoutMS` set, up to 15 minutes. BullMQ has no job timeout, so a job that hangs on a remote call holds its slot until the worker restarts. Pass an `AbortSignal.timeout(ms)` to every `fetch` in a job. Cloud Tasks gives an HTTP handler 10 minutes by default and 30 at most.
 
-The host has a limit too, and a job delivered as an HTTP request ends at whichever limit is shorter. Cloud Run fails a request with a `504` after 5 minutes by default, and 60 minutes is the most it allows. Vercel ends a function after 300 seconds by default. That is also the most the Hobby plan allows, and Pro allows 800 seconds. So an action with `timeoutMS` of 12 minutes, delivered by Cloud Tasks to a Cloud Run service with default settings, fails at 5 minutes. Cloud Tasks retries it from the start, and it fails at 5 minutes on every attempt. Set the host's timeout and the queue's deadline above the longest `timeoutMS` the inventory lists, or split the work into jobs that each finish well inside the limit.
+The host has a limit too, and a job delivered as an HTTP request ends at whichever limit is shorter. Cloud Run fails a request with a `504` after 5 minutes by default, and 60 minutes is the most it allows. Vercel ends a function after 300 seconds by default, and `maxDuration` raises that up to your plan's maximum, on Vercel's [limits page](https://vercel.com/docs/functions/limitations#max-duration). So an action with `timeoutMS` of 12 minutes, delivered by Cloud Tasks to a Cloud Run service with default settings, fails at 5 minutes. Cloud Tasks retries it from the start, and it fails at 5 minutes on every attempt. Set the host's timeout and the queue's deadline above the longest `timeoutMS` the inventory lists, or split the work into jobs that each finish well inside the limit.
 
 ## Duplicate jobs
 
@@ -84,7 +84,7 @@ The Inngest function was run against the Inngest dev server: with 6 events for o
 
 Gadget counted the limit across every action that used the queue name. An Inngest `key` or a Trigger.dev `perKey` counts one function or task, so two of them with a limit of 2 ran 4 jobs for one store at once. The inventory marks each `api.enqueue` call that passes `queue` but doesn't print the name, so read those calls. When two of them pass the same `queue.name`, give every Inngest function that replaces them `concurrency: { scope: "env", key: '"external-" + event.data.shopId', limit: 2 }`, or list one `queue({ name: "external", concurrencyLimit: 2 })` as `queue` on every Trigger.dev task and pass the store's id as `concurrencyKey` on each trigger. Gadget's [Inngest](https://docs.gadget.dev/guides/moving-to-another-platform/inngest#share-a-limit-between-functions) and [Trigger.dev](https://docs.gadget.dev/guides/moving-to-another-platform/trigger-dev#share-a-limit-between-tasks) guides ran both forms: each held one store to 2 jobs across two functions or tasks. A named Trigger.dev `concurrencyLimit()` shared by two tasks did not.
 
-BullMQ has per-group limits only in the paid BullMQ Pro. With the free version, gate each job on a Postgres advisory lock per store and slot, and put the job back in the queue when every slot is taken:
+BullMQ has per-group limits only in BullMQ Pro. With open-source BullMQ, gate each job on a Postgres advisory lock per store and slot, and put the job back in the queue when every slot is taken:
 
 ```typescript
 // in app/jobs/shopSlots.server.ts
@@ -144,7 +144,7 @@ export const options: ActionOptions = {
 
 becomes a cron job with the schedule `0 2 * * *` that calls the same function. Gadget's scheduler made three promises, and not every replacement keeps them:
 
-- **At most once a minute, starting within 10 seconds of the scheduled time.** Railway cron jobs must be at least 5 minutes apart. Vercel Schedules, in beta, run at most every 15 minutes on the Hobby plan and start each run at some point in a 15-minute window after the scheduled time. On Pro the window is 1 minute by default.
+- **At most once a minute, starting within 10 seconds of the scheduled time.** Railway cron jobs must be at least 5 minutes apart. Vercel Schedules, in beta, start each run within a window after the scheduled time, and the window and how often a schedule can run depend on your plan ([Vercel's Schedules docs](https://vercel.com/docs/schedules)).
 - **No overlapping runs.** Gadget skipped a run while the previous one was still going. Railway skips too, and Render delays the next run until the current one finishes. Vercel can start overlapping runs, and Vercel and Cloud Scheduler can deliver the same run twice. Those hosts protect only the cron command, so once it only adds a job to your queue, two jobs can run at once on a worker whose concurrency is above 1.
 - **Retries.** Gadget retried a failed run, up to 5 attempts. Vercel doesn't retry a run that targets a function or a path. Cloud Scheduler doesn't retry unless you set a retry count on the job, which is 0 by default. Render's and Railway's documentation promise no retry. Without one, a failed nightly job waits a whole day.
 

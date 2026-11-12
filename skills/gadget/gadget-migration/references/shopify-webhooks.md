@@ -212,7 +212,7 @@ Gadget uses per-store subscriptions for models with metafield fields because sub
 - **Checking `updated_at` in a separate `select`.** Two workers can both pass the check and the older one can write last. Put the check in the `where` of the upsert.
 - **Pruning children from a narrowed payload.** Deletes every line item when `line_items` isn't in `include_fields`.
 - **Porting install code into `afterAuth` as it is.** It runs for every existing store on its merchant's first visit after the move, and again after later token exchanges.
-- **A host that scales to zero.** Shopify waits 5 seconds. A server that takes longer than that to start fails the first webhook after every quiet period. Keep one instance running, such as with Cloud Run's minimum instances, and don't take webhooks on a free tier that stops idle services.
+- **A host that scales to zero.** Shopify waits 5 seconds. A server that takes longer than that to start fails the first webhook after every quiet period. Keep one instance running, such as with Cloud Run's minimum instances, and don't take webhooks on an instance type that stops when idle.
 - **Dropping `shopifyFilter`.** The new subscription delivers every change for the topic, not only the ones the Gadget action ran for.
 - **Parsing ids as JavaScript numbers.** Store them in `bigint` columns, and convert with `BigInt(payload.id)`. Prisma maps `bigint` to `BigInt`.
 
