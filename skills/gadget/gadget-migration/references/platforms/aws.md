@@ -277,7 +277,7 @@ Scheduler delivers at least once, retries only its delivery, and starts the next
 The worker connects as `app_user`, so a delete across every store fails with `unrecognized configuration parameter "app.shop_id"`, or with `invalid input syntax for type bigint: ""` on a connection an earlier job set the store on. [shop-tenancy.md](../shop-tenancy.md#code-that-works-across-stores) offers a role with `bypassrls` for such jobs, but RDS's master user doesn't have `BYPASSRLS`, and PostgreSQL lets only a superuser or a role with it create one. On PostgreSQL 18, `create role maint bypassrls` as a role like the master user fails with `Only roles with the BYPASSRLS attribute may create roles with the BYPASSRLS attribute`. Put the cross-store statement in a `security definer` function instead. It runs as its owner, the master user that runs migrations, which owns the table, and `app_user` can call that function and nothing else across stores:
 
 ```sql
--- in prisma/migrations/20261112000000_schedule_run/migration.sql
+-- in prisma/migrations/<timestamp>_schedule_run/migration.sql
 -- runs after the guide's app_user exists, because of the grant at the end
 create table schedule_run (
   schedule text not null,

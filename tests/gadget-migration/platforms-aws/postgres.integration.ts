@@ -52,7 +52,7 @@ describe("the scheduled job on an RDS-like master user", { skip: !hasImage(IMAGE
     await master.query("alter table audit_log enable row level security");
     await master.query("create policy audit_log_shop_isolation on audit_log using (shop_id = current_setting('app.shop_id')::bigint)");
     await master.query(GUIDE_ROLE_SQL);
-    await master.query(block("aws.md", "prisma/migrations/20261112000000_schedule_run/migration.sql"));
+    await master.query(block("aws.md", "prisma/migrations/<timestamp>_schedule_run/migration.sql"));
 
     if (!existsSync(join(here, "node_modules/.prisma/client/index.js"))) {
       execFileSync(join(here, "node_modules/.bin/prisma"), ["generate", "--schema", "prisma/schema.prisma"], { cwd: here, stdio: "pipe" });

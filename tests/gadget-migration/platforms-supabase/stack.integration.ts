@@ -125,7 +125,7 @@ describe("supabase.md on the local Supabase stack", () => {
     await admin.query(`insert into "Session" (id, shop, state, "accessToken") values ('offline_${run}.myshopify.com', '${run}.myshopify.com', 'x', 'shpat_example')`);
     const open = await restGet(`Session?select=shop,accessToken&shop=eq.${run}.myshopify.com`);
     assert.deepEqual(open, [{ shop: `${run}.myshopify.com`, accessToken: "shpat_example" }]);
-    await admin.query(sql("prisma/migrations/20261109000000_lock_session/migration.sql"));
+    await admin.query(sql("prisma/migrations/<timestamp>_lock_session/migration.sql"));
     const locked = await restGet("Session?select=shop");
     assert.equal(locked.code, "42501");
     assert.match(locked.message, /permission denied for table Session/);

@@ -201,7 +201,7 @@ describe("supabase.md migration set on Supabase's Postgres image", () => {
     await admin.query(template);
     // what an older project's default grants, or a table made before the role migration, gives it
     await admin.query(`grant all on "Session" to anon, authenticated`);
-    await admin.query(sql("prisma/migrations/20261109000000_lock_session/migration.sql"));
+    await admin.query(sql("prisma/migrations/<timestamp>_lock_session/migration.sql"));
     const { rows } = await admin.query(`select has_table_privilege('anon', '"Session"', 'select') as anon,
       has_table_privilege('authenticated', '"Session"', 'select') as authenticated, has_table_privilege('app_server', '"Session"', 'insert') as server`);
     assert.deepEqual(rows, [{ anon: false, authenticated: false, server: true }]);

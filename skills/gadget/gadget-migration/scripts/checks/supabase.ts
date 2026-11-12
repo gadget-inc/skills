@@ -534,7 +534,7 @@ function codeFindings(repo: Repo): Finding[] {
         line: lineAt(text, match.index!),
         message: "This imports users with a password hash and no email_confirm, so each one is created unconfirmed and can't sign in with their Gadget password.",
         error: "Email not confirmed",
-        fix: "Pass email_confirm: user.emailVerified, or true for every user Gadget let sign in without verifying.",
+        fix: "Pass email_confirm: user.emailVerified, which Gadget's sign-in already required.",
         docs: `${GUIDE}#move-app-users-and-sessions`,
       });
     }

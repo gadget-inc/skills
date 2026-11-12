@@ -2,9 +2,9 @@
 
 ## What is this?
 
-Supabase is Postgres with sign-in, file storage, realtime updates, a queue (pgmq), a scheduler (pg_cron), and an HTTPS API built from your tables (the Data API). It runs no long-lived Node server, so the app server and job workers still need a Node host. Most of what goes wrong is in the database: tables the publishable key can read, a server role that skips every policy or can't see pgvector, and cron jobs that start too early and hide their failures. Gadget's guide: https://docs.gadget.dev/guides/moving-to-another-platform/supabase
+Supabase is Postgres with sign-in, file storage, realtime updates, a queue (pgmq), a scheduler (pg_cron), and an HTTPS API built from your tables (the Data API). It runs no long-lived Node server, so the app server and job workers still need a Node host. Most failures are in the database: tables the publishable key can read, a server role that skips every policy or can't see pgvector, and cron jobs that start too early and hide their failures.
 
-For Supabase itself (the CLI, the Data API's grants, row-level security rules, Postgres practice), load Supabase's `supabase` and `supabase-postgres-best-practices` skills: `npx skills add supabase/agent-skills` (https://github.com/supabase/agent-skills). This file covers only what breaks or changes because the app came from Gadget.
+For Supabase itself (the CLI, Data API grants, policies, Postgres practice), load Supabase's `supabase` and `supabase-postgres-best-practices` skills: `npx skills add supabase/agent-skills` (https://github.com/supabase/agent-skills). This file covers only what breaks or changes because the app came from Gadget.
 
 Read [common.md](common.md) first.
 
@@ -67,7 +67,7 @@ order by c.relname;
 | A message with `read_ct` 2 while its first run is still going | Its visibility timeout ended mid-job | Renew it while the job runs, as the worker below does |
 | `Direct deletion from storage tables is not allowed. Use the Storage API instead.` | SQL against `storage.objects` | `storage.from(bucket).remove([path])` |
 | `ID must conform to the uuid v4 format` | A Gadget id passed as `id` to `createUser` | Put it in `app_metadata.gadget_id` |
-| `Email not confirmed` | Imported without `email_confirm` | `email_confirm: true` for users Gadget let sign in |
+| `Email not confirmed` | Imported without `email_confirm` | `email_confirm: user.emailVerified`, which Gadget's sign-in already required |
 | `Invalid login credentials` for an imported user with the right password | The hash went in `password`, so it became the password | `password_hash` |
 | `Error creating user` (500) | `password_hash` isn't a bcrypt hash, such as the whole `password` object | `user.password?.hash` |
 | `Target: local stack (127.0.0.1:54322)`, then `connect ECONNREFUSED` | `supabase db push` without `--remote` on CLI 3 | `supabase db push --remote` |
@@ -135,10 +135,10 @@ alter default privileges for role postgres in schema pgmq grant select, insert, 
 alter default privileges for role postgres in schema pgmq grant select on sequences to app_server;
 ```
 
-If Prisma Migrate still creates the template's `Session` table, lock it in a Prisma migration that runs after the role exists. Revoke rather than enable row-level security: with it on and no policy for `app_server`, session storage finds nothing and every request signs the merchant in again.
+If Prisma Migrate creates the template's `Session` table, lock it in a migration made after your init one with `npx prisma migrate dev --create-only --name lock_session`, so it sorts after the table. Revoke rather than enable row-level security: with no policy for `app_server`, session storage finds nothing and every request signs the merchant in again.
 
 ```sql
--- in prisma/migrations/20261109000000_lock_session/migration.sql
+-- in prisma/migrations/<timestamp>_lock_session/migration.sql
 REVOKE ALL ON "Session" FROM anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON "Session" TO app_server;
 ```
