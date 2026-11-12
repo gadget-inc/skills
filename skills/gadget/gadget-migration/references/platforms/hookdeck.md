@@ -2,11 +2,9 @@
 
 ## What is this?
 
-Hookdeck receives Shopify's webhooks, answers Shopify, and delivers each one to your app with retries, so the app's route can do the work before it responds. Gadget's guide has the setup: https://docs.gadget.dev/guides/moving-to-another-platform/hookdeck.
+Hookdeck receives Shopify's webhooks, answers Shopify, and delivers each one to your app with retries, so the app's route can do the work before it responds.
 
-For Hookdeck itself (the CLI, sources, connections, rules, replay), load Hookdeck's `event-gateway` skill, and `shopify-webhooks` for the HMAC check: `npx skills add hookdeck/agent-skills --skill event-gateway` (https://github.com/hookdeck/agent-skills) and `npx skills add hookdeck/webhook-skills --skill shopify-webhooks` (https://github.com/hookdeck/webhook-skills). This file covers only what breaks or changes because the app came from Gadget.
-
-Read [common.md](common.md) first. [shopify-webhooks.md](../shopify-webhooks.md) covers the Shopify source, path forwarding, the retry and deduplicate rules, and both signature checks; this file adds checks, failure signatures, and the code for moving stores one at a time, delivery groups, and the `processed_webhook` cleanup.
+For Hookdeck itself (the CLI, sources, connections, rules, replay), load Hookdeck's `event-gateway` skill, and `shopify-webhooks` for the HMAC check: `npx skills add hookdeck/agent-skills --skill event-gateway` (https://github.com/hookdeck/agent-skills) and `npx skills add hookdeck/webhook-skills --skill shopify-webhooks` (https://github.com/hookdeck/webhook-skills). Read [common.md](common.md) first. [shopify-webhooks.md](../shopify-webhooks.md) covers the Shopify source, path forwarding, the retry and deduplicate rules, and both signature checks. This file adds what changes because the app came from Gadget: checks, failure signatures, and the code for moving stores one at a time, delivery groups, and the `processed_webhook` cleanup.
 
 ## Checks to run
 
@@ -89,7 +87,7 @@ One script, with Prisma from Shopify's template for the table. `filters` prints 
 // The API key is the project's, from its Secrets settings. Each environment has its own project.
 import prisma from "../app/db.server";
 
-// the new app's connection, and for a store-by-store move, one connection to Gadget per subscription,
+// the new app's connection, and for a store-by-store move on framework 1.7+, one connection to Gadget per subscription,
 // with the path of the new app's matching subscription. Leave GADGET empty if every store moves at once.
 const NEW_APP = "shopify-to-new-app";
 const GADGET: Record<string, string> = { "shopify-to-gadget-orders-updated": "/webhooks/orders/updated" };
@@ -263,14 +261,13 @@ if (process.argv[1]?.endsWith("prune-processed-webhooks.server.ts")) {
 
 The order in [cutover.md](../cutover.md) and the guide's [Cut over to the new platform](https://docs.gadget.dev/guides/moving-to-another-platform/hookdeck#cut-over-to-the-new-platform) hold. With the script, each step of [Move one store at a time](https://docs.gadget.dev/guides/moving-to-another-platform/hookdeck#move-one-store-at-a-time) becomes:
 
-- **Step 1, load its records:** as the guide says.
-- **Steps 2 and 3, stop its webhooks to Gadget and send them to the new app:** `insert into moved_store (shop_domain) values ('store-a.myshopify.com');`, then `node scripts/hookdeck.ts filters --apply`. One run writes both sides from the same list.
-- **Step 4, wait for Gadget:** repeat `node scripts/hookdeck.ts pending store-a.myshopify.com` until it prints `[]`, retry or note any `FAILED` events, then wait for Gadget's Queues page as the guide says.
+- **Steps 2 and 3, stop its webhooks to Gadget and send them to the new app:** `insert into moved_store (shop_domain) values ('store-a.myshopify.com');`, then `node scripts/hookdeck.ts filters --apply`. Then delete the store's per-store subscriptions with [cutover.md](../cutover.md#delete-per-store-webhook-subscriptions)'s script and Gadget's token for the store: the metafield-model ones on framework 1.7+, all of them before 1.7, where `filters --apply` writes only the new app's filter and `pending` prints `[]` at once.
+- **Step 4, wait for Gadget:** repeat `node scripts/hookdeck.ts pending store-a.myshopify.com` until it prints `[]`, retry or note any `FAILED` events, then wait for Gadget's Queues page.
 - **Steps 5 and 6, move its tokens and reconcile it:** as the guide says, then remove the store's rows Shopify deleted while its webhooks went to Gadget or to neither app, with `deleteMissing` from [shopify-sync.md](../shopify-sync.md#delete-records-shopify-deleted-before-the-switch). A reconciliation never returns a deleted record.
 
 Split scheduled work, the off switch, each store's catch-up export, the id gap, and records that belong to no store as [Moving stores in stages](../cutover.md#moving-stores-in-stages) describes.
 
-A store moves back with `delete from moved_store where shop_domain = '...'` and another `filters --apply` only while the new app holds no offline session for it. A merchant who opened the new app after the store moved already retired Gadget's refresh token, so copy the new app's tokens back to the store's `shopifyShop` record first, as in [Moving back](../cutover.md#moving-back). After the token move, every store is in that state. Before a deploy that would fail webhooks for a while, pause the connection, as the guide's [Keep Shopify data in sync](https://docs.gadget.dev/guides/moving-to-another-platform/hookdeck#keep-shopify-data-in-sync) describes.
+A store moves back with `delete from moved_store where shop_domain = '...'` and another `filters --apply` only while the new app holds no offline session for it. A merchant who opened the new app after the store moved already retired Gadget's refresh token, so copy the new app's tokens back to the store's `shopifyShop` record first, as in [Moving back](../cutover.md#moving-back). After the token move, every store is in that state.
 
 ## What wasn't verified
 

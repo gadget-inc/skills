@@ -2,9 +2,9 @@
 
 ## What is this?
 
-Trigger.dev is a hosted queue that builds your tasks into a container and runs them on its own machines, so it replaces background actions and scheduled actions, and the host's request timeout no longer applies. Gadget's guide covers the setup and each option: https://docs.gadget.dev/guides/moving-to-another-platform/trigger-dev.
+Trigger.dev is a hosted queue that builds your tasks into a container and runs them on its own machines, so it replaces background actions and scheduled actions, and the host's request timeout no longer applies.
 
-For Trigger.dev itself (project setup, writing tasks, queues, schedules), load Trigger.dev's skills: `npx trigger.dev@latest skills` (installs `trigger-getting-started` and `trigger-authoring-tasks`, pinned to your SDK version), or `npx skills add triggerdotdev/skills` (the same guides as `trigger-setup` and `trigger-tasks`) (https://github.com/triggerdotdev/skills). Neither covers deploys, so this file does. This file covers only what breaks or changes because the app came from Gadget.
+For Trigger.dev itself (project setup, writing tasks, queues, schedules), load Trigger.dev's skills: `npx trigger.dev@latest skills` (installs `trigger-getting-started` and `trigger-authoring-tasks`, pinned to your SDK version), or `npx skills add triggerdotdev/skills` (the same guides as `trigger-setup` and `trigger-tasks`) (https://github.com/triggerdotdev/skills). Neither covers deploys. This file covers those and what changes because the app came from Gadget.
 
 Read [common.md](common.md) first, and [background-jobs.md](../background-jobs.md) for the option-by-option map from `api.enqueue`.
 
@@ -49,7 +49,7 @@ What the script can't see:
 | `Property 'maxDuration' is missing in type` from `tsc` on `trigger.config.ts` | No `maxDuration` | Set it above your longest action, such as `900` for Gadget's 15-minute maximum |
 | `MAX_DURATION_EXCEEDED`, status **Timed out** | An attempt ran longer than `maxDuration`. `onFailure` doesn't run | Raise `maxDuration`, or split the task ([Check your host's time limits](https://docs.gadget.dev/guides/moving-to-another-platform/trigger-dev#check-your-host-s-time-limits)) |
 | A run stays `QUEUED` and never starts | Triggered with another environment's key, or a negative `priority` on an empty queue | Use the environment's key; pass `0` for `low`. A run with no priority counts as 0, so `default` needs `300` |
-| A second trigger with the same `idempotencyKey` starts a new run | The first run failed, which clears the key, or the TTL ran out | Expected. Gadget kept a failed job's id for 7 days, so make the job safe to run twice |
+| A second trigger with the same `idempotencyKey` starts a new run | A raw string key from inside another task (scoped to that run), a failed first run, or an expired TTL | `scope: "global"`, as `enqueue` below does. Otherwise expected. Gadget kept a failed job's id for 7 days, so make the job safe to run twice |
 | Two tasks on one shared limit run 8 jobs for one store at once | A named `concurrencyLimit()` that isn't enforced, as on self-hosted 4.8.3 | Share a `queue({ concurrencyLimit })`, as below |
 | `403` from Shopify's Admin API in a task run, while the same call from your server succeeds | Shopify's IP allowlist is enforced, and it covers your host but not Trigger.dev's machines | Add the static addresses on the dashboard's **Regions** page as addresses next to your host's entries, or, with no static addresses, the ASN and country Trigger.dev confirms your tasks call from (`trigger-dev/shopify-from-tasks`, [Call Shopify from your tasks](https://docs.gadget.dev/guides/moving-to-another-platform/trigger-dev#call-shopify-from-your-tasks)) |
 | `@prisma/client did not initialize yet` in a run | The deployed image has no generated Prisma client | `prismaExtension({ mode: "legacy", schema: "prisma/schema.prisma" })` in `build.extensions` |
@@ -147,7 +147,7 @@ export const notifyExternalSystemOfUpdateTask = task({
 
 ```typescript
 // in app/services/jobs.server.ts
-import { tasks, type AnyTask, type TaskIdentifier, type TaskPayload } from "@trigger.dev/sdk";
+import { idempotencyKeys, tasks, type AnyTask, type TaskIdentifier, type TaskPayload } from "@trigger.dev/sdk";
 
 export interface EnqueueOptions {
   shopId: string;
@@ -166,17 +166,19 @@ const MAX_DURATION_MS = 900 * 1000;
 // Call after the transaction commits, never inside it. Import tasks with `import type`.
 export async function enqueue<TTask extends AnyTask>(id: TaskIdentifier<TTask>, payload: TaskPayload<TTask>, options: EnqueueOptions) {
   const delayMs = options.startAt ? Math.max(0, options.startAt.getTime() - Date.now()) : 0;
+  // global like Gadget's id: since SDK 4.3.1, a raw string from inside a task is scoped to that run
+  const idempotencyKey = options.id ? await idempotencyKeys.create(options.id, { scope: "global" }) : undefined;
   return tasks.trigger<TTask>(id, payload, {
     concurrencyKey: options.shopId,
     priority: PRIORITY[options.priority ?? "default"],
     ...(options.startAt ? { delay: options.startAt } : {}),
     // Gadget kept an id until 1 day after the job succeeded. The TTL counts from the trigger, so add the delay and the run time.
-    ...(options.id ? { idempotencyKey: options.id, idempotencyKeyTTL: `${Math.ceil((delayMs + MAX_DURATION_MS + DAY) / DAY)}d` } : {}),
+    ...(idempotencyKey ? { idempotencyKey, idempotencyKeyTTL: `${Math.ceil((delayMs + MAX_DURATION_MS + DAY) / DAY)}d` } : {}),
   });
 }
 ```
 
-In the guide's `handleOrderCreated`, the trigger after the commit becomes ``await enqueue<typeof notifyExternalSystemTask>("notify-external-system", { shopId: String(shopId), orderId: String(order.id) }, { shopId: String(shopId), id: `order-created-${order.id}` })``, with the task imported by `import type`. Write the order with `createMany` and `skipDuplicates: true`, as the main guide's [Move action code to plain functions](https://docs.gadget.dev/guides/moving-to-another-platform#move-action-code-to-plain-functions) does, so a retry after a failed trigger skips the writes and reaches the trigger instead of failing on the order's id. An `api.enqueue` that ran only when the write changed something, such as after `record.changed("financialStatus")`, can't move after the commit, because a retry after a failed trigger finds nothing changed and triggers nothing. Insert it into the outbox from [actions-and-transactions.md](../actions-and-transactions.md#a-job-that-must-never-be-lost) inside the transaction, and have `drainOutbox` call `enqueue` with `id: job.id`.
+In the guide's `handleOrderCreated`, the trigger after the commit becomes ``await enqueue<typeof notifyExternalSystemTask>("notify-external-system", { shopId: String(shopId), orderId: String(order.id) }, { shopId: String(shopId), id: `order-created-${order.id}` })``, with the task imported by `import type`. An `api.enqueue` that ran only when the write changed something, such as after `record.changed("financialStatus")`, can't move after the commit, because a retry after a failed trigger finds nothing changed and triggers nothing. Insert it into the outbox from [actions-and-transactions.md](../actions-and-transactions.md#a-job-that-must-never-be-lost) inside the transaction, and have `drainOutbox` call `enqueue` with `id: job.id`.
 
 ### A scheduled action, attached at cutover
 
