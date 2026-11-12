@@ -1,12 +1,12 @@
-// Checks for apps moving to Google Cloud Run. references/platforms/google-cloud-run.md explains each one.
+// Checks for apps moving to Google Cloud. references/platforms/google-cloud.md explains each one.
 import { DOCS, type CheckModule, type Finding, type Repo } from "./types.ts";
 import { dockerCommand, keyLine, lineAt, lineOf, parseDockerfile, parseYaml } from "./read-config.ts";
 import { dockerfileCmd, expandScripts, startOverrideFindings } from "./common.ts";
 import { arithmetic } from "./railway.ts";
 import { prismaUrls } from "./render.ts";
 
-const GUIDE = `${DOCS}/google-cloud-run`;
-const REF = "references/platforms/google-cloud-run.md";
+const GUIDE = `${DOCS}/google-cloud`;
+const REF = "references/platforms/google-cloud.md";
 
 // ---------------------------------------------------------------------------------------------
 // gcloud commands in shell scripts, CI workflows, and cloudbuild.yaml
@@ -231,7 +231,7 @@ function shopifyEnvFindings(repo: Repo, commands: Gcloud[], findings: Finding[])
         } catch (error) {
           unreadable = true;
           findings.push({
-            id: "google-cloud-run/unreadable-config",
+            id: "google-cloud/unreadable-config",
             severity: "manual",
             file: path,
             message: `The checks couldn't read ${path} (${(error as Error).message}), so they couldn't tell which variables ${serviceName(c)} gets.`,
@@ -246,7 +246,7 @@ function shopifyEnvFindings(repo: Repo, commands: Gcloud[], findings: Finding[])
     if (unreadable || !missingFrom.size) continue;
     const [path, missing] = [...missingFrom][0];
     findings.push({
-      id: "google-cloud-run/shopify-env-missing",
+      id: "google-cloud/shopify-env-missing",
       severity: "error",
       file: c.file,
       line: c.line,
@@ -264,7 +264,7 @@ function secretFindings(commands: Gcloud[], findings: Finding[]) {
     const latest = values.flatMap((v) => v.split(",")).filter((pair) => /:latest$/.test(pair.trim()));
     if (!latest.length) continue;
     findings.push({
-      id: "google-cloud-run/secret-latest",
+      id: "google-cloud/secret-latest",
       severity: "warning",
       file: c.file,
       line: c.line,
@@ -324,7 +324,7 @@ function timeoutFindings(repo: Repo, commands: Gcloud[], findings: Finding[]) {
   const flagValue = (s: number) => minutes(s).replace(" minutes", "m").replace(" seconds", "s");
   if (unread) {
     findings.push({
-      id: "google-cloud-run/timeout-deadline",
+      id: "google-cloud/timeout-deadline",
       severity: "manual",
       file: unread.file,
       line: unread.line,
@@ -334,7 +334,7 @@ function timeoutFindings(repo: Repo, commands: Gcloud[], findings: Finding[]) {
     });
   } else if (deadline < timeout && deadline >= MAX_DEADLINE) {
     findings.push({
-      id: "google-cloud-run/timeout-deadline",
+      id: "google-cloud/timeout-deadline",
       severity: "warning",
       file: worker.file,
       line: worker.line,
@@ -345,7 +345,7 @@ function timeoutFindings(repo: Repo, commands: Gcloud[], findings: Finding[]) {
     });
   } else if (deadline < timeout) {
     findings.push({
-      id: "google-cloud-run/timeout-deadline",
+      id: "google-cloud/timeout-deadline",
       severity: "error",
       file: where.file,
       line: where.line,
@@ -358,7 +358,7 @@ function timeoutFindings(repo: Repo, commands: Gcloud[], findings: Finding[]) {
     });
   } else if (deadline > timeout) {
     findings.push({
-      id: "google-cloud-run/timeout-deadline",
+      id: "google-cloud/timeout-deadline",
       severity: "warning",
       file: worker.file,
       line: worker.line,
@@ -384,7 +384,7 @@ function startFindings(repo: Repo, commands: Gcloud[], findings: Finding[]) {
     const match = expanded.match(/prisma\s+db\s+push|migrate\s+deploy/);
     if (!match) continue;
     findings.push({
-      id: "google-cloud-run/migrate-on-start",
+      id: "google-cloud/migrate-on-start",
       severity: "warning",
       file: path,
       line: lineOf(text, /prisma\s+db\s+push|migrate\s+deploy|npm run \w+/),
@@ -398,12 +398,12 @@ function startFindings(repo: Repo, commands: Gcloud[], findings: Finding[]) {
     // a start script's own lines count as part of the command, such as one that runs prisma generate
     const scripts = (cmd.command.match(/[\w./-]+\.sh\b/g) ?? []).map((p) => [p, p.replace(/^\/app\//, ""), p.replace(/^\.?\//, "")].find((x) => repo.exists(x))).filter((p): p is string => !!p);
     const generates = scripts.some((p) => /prisma\s+generate/.test(expandScripts(repo, repo.read(p) ?? "")));
-    if (!generates) findings.push(...startOverrideFindings(repo, "google-cloud-run", "Dockerfile", cmd.line, cmd.command, `${GUIDE}#rebuild-the-shopify-connection`).slice(0, 1));
+    if (!generates) findings.push(...startOverrideFindings(repo, "google-cloud", "Dockerfile", cmd.line, cmd.command, `${GUIDE}#rebuild-the-shopify-connection`).slice(0, 1));
   }
   for (const c of commands.filter((c) => isCmd(c, "run", "deploy") && has(c, "command"))) {
     const command = [flag(c, "command"), ...(flag(c, "args") ?? "").split(",")].join(" ").trim();
-    if (findings.some((f) => f.id === "google-cloud-run/prisma-generate")) break;
-    findings.push(...startOverrideFindings(repo, "google-cloud-run", c.file, c.line, command, `${GUIDE}#rebuild-the-shopify-connection`));
+    if (findings.some((f) => f.id === "google-cloud/prisma-generate")) break;
+    findings.push(...startOverrideFindings(repo, "google-cloud", c.file, c.line, command, `${GUIDE}#rebuild-the-shopify-connection`));
   }
 }
 
@@ -439,7 +439,7 @@ function iamFindings(repo: Repo, commands: Gcloud[], findings: Finding[]) {
   const iamFiles = repo.files.filter((f) => /\.(sh|bash|ya?ml|tf|json)$/.test(f) && !/(^|\/)(node_modules|test|tests|fixtures)\/|package(-lock)?\.json$/.test(f) && /add-iam-policy-binding|google_\w+_iam_(member|binding)/.test(repo.read(f) ?? ""));
   if (!iamFiles.length) {
     findings.push({
-      id: "google-cloud-run/iam-roles",
+      id: "google-cloud/iam-roles",
       severity: "manual",
       message: `The app needs these roles, and no IAM script or Terraform in the repository grants them: ${needs.map((n) => `${n.role} (${n.why})`).join("; ")}.`,
       fix: 'Check each account with gcloud projects get-iam-policy PROJECT_ID --flatten=bindings --filter="bindings.members:serviceAccount:ACCOUNT_EMAIL" --format="value(bindings.role)", plus gcloud run services get-iam-policy my-app-worker and gcloud iam service-accounts get-iam-policy for roles granted on one resource.',
@@ -450,7 +450,7 @@ function iamFindings(repo: Repo, commands: Gcloud[], findings: Finding[]) {
   const granted = new Set(iamFiles.flatMap((f) => [...(repo.read(f) ?? "").matchAll(/roles\/[\w.]+/g)].map((m) => m[0])));
   for (const n of needs.filter((n) => !granted.has(n.role))) {
     findings.push({
-      id: "google-cloud-run/iam-roles",
+      id: "google-cloud/iam-roles",
       severity: "warning",
       file: n.file,
       line: n.line,
@@ -467,7 +467,7 @@ function queueFindings(repo: Repo, findings: Finding[]) {
     const text = repo.read(file) ?? "";
     if (!/\.deleteQueue\s*\(/.test(text)) continue;
     findings.push({
-      id: "google-cloud-run/delete-queue",
+      id: "google-cloud/delete-queue",
       severity: "warning",
       file,
       line: lineOf(text, /\.deleteQueue\s*\(/),
@@ -481,7 +481,7 @@ function queueFindings(repo: Repo, findings: Finding[]) {
 function pubsubFindings(commands: Gcloud[], findings: Finding[]) {
   for (const c of commands.filter((c) => isCmd(c, "pubsub", "subscriptions", "create") && !has(c, "expiration-period"))) {
     findings.push({
-      id: "google-cloud-run/pubsub-expiration",
+      id: "google-cloud/pubsub-expiration",
       severity: "warning",
       file: c.file,
       line: c.line,
@@ -498,7 +498,7 @@ function scalingFindings(commands: Gcloud[], findings: Finding[]) {
     if (!missing.length) continue;
     const name = serviceName(c);
     findings.push({
-      id: "google-cloud-run/instance-limits",
+      id: "google-cloud/instance-limits",
       severity: "manual",
       file: c.file,
       line: c.line,
@@ -528,13 +528,13 @@ function taskRouteFindings(repo: Repo, findings: Finding[]) {
     const imports = [...text.matchAll(/from\s+["'](\.{1,2}\/[^"']+)["']/g)].map((m) => resolveImport(repo, file, m[1]));
     if (imports.some((f) => f && /K_SERVICE/.test(repo.read(f) ?? ""))) continue;
     findings.push({
-      id: "google-cloud-run/task-route-public",
+      id: "google-cloud/task-route-public",
       severity: "warning",
       file,
       line: lineOf(text, /export\s+(const|async function|function)\s+action\b/),
       message: "Both services run the same image, so this task route also answers on the public web service, where anyone can POST a job to it without a Google-signed token.",
       fix: 'Return 404 unless process.env.K_SERVICE is the worker\'s name, such as if (process.env.K_SERVICE !== "my-app-worker") return new Response(null, { status: 404 }).',
-      docs: `${GUIDE}#replace-background-and-scheduled-actions`,
+      docs: `${GUIDE}#create-tasks-from-your-app`,
     });
   }
 }
@@ -552,7 +552,7 @@ function migrateJobFindings(repo: Repo, commands: Gcloud[], findings: Finding[])
     // --wait implies --execute-now on jobs deploy
     const runs = list.find((c) => (isCmd(c, "run", "jobs", "deploy") && has(c, "execute-now", "wait")) || (isCmd(c, "run", "jobs", "execute") && serviceName(c) === name));
     const text = repo.read(file) ?? "";
-    const base = { id: "google-cloud-run/migrate-before-deploy", file, docs: `${GUIDE}#run-migrations-once-per-deploy` } as const;
+    const base = { id: "google-cloud/migrate-before-deploy", file, docs: `${GUIDE}#run-migrations-once-per-deploy` } as const;
     if (!runs) {
       findings.push({ ...base, severity: "error", line: migrate.line, message: `This deploys the job ${name} but never runs it, so the services deploy without their migrations.`, fix: "Add --execute-now --wait to the jobs deploy command, or run gcloud run jobs execute with --wait before the services deploy." });
     } else if (!has(runs, "wait")) {
@@ -593,7 +593,7 @@ function ownerFindings(repo: Repo, commands: Gcloud[], findings: Finding[]) {
     if (!service) continue;
     const tables = [...new Set(unforced.map((t) => t.table))];
     findings.push({
-      id: "google-cloud-run/owner-skips-rls",
+      id: "google-cloud/owner-skips-rls",
       severity: "error",
       file: job.file,
       line: job.line,
@@ -615,7 +615,7 @@ function sharedAccountFindings(commands: Gcloud[], findings: Finding[]) {
     const service = commands.find((c) => isCmd(c, "run", "deploy") && flag(c, "service-account") === account);
     if (!service) continue;
     findings.push({
-      id: "google-cloud-run/migrate-shared-account",
+      id: "google-cloud/migrate-shared-account",
       severity: "warning",
       file: job.file,
       line: job.line,
@@ -630,7 +630,7 @@ function sqlUserFindings(commands: Gcloud[], findings: Finding[]) {
   // IAM database users (--type=cloud_iam_user and the like) aren't what the guide describes
   for (const c of commands.filter((c) => isCmd(c, "sql", "users", "create") && /^(built_in)?$/i.test(flag(c, "type") ?? ""))) {
     findings.push({
-      id: "google-cloud-run/sql-user-create",
+      id: "google-cloud/sql-user-create",
       severity: "warning",
       file: c.file,
       line: c.line,
@@ -641,9 +641,9 @@ function sqlUserFindings(commands: Gcloud[], findings: Finding[]) {
   }
 }
 
-export const googleCloudRun: CheckModule = {
-  platform: "google-cloud-run",
-  title: "Google Cloud Run",
+export const googleCloud: CheckModule = {
+  platform: "google-cloud",
+  title: "Google Cloud",
   detect: (repo) =>
     "@google-cloud/tasks" in repo.dependencies() ||
     repo.exists("cloudbuild.yaml") ||

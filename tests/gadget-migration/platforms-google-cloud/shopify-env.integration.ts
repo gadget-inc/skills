@@ -1,5 +1,5 @@
 // Reproduces the startup errors of a service that loads the template's shopify.server.ts without the
-// Shopify variables, which google-cloud-run.md and the google-cloud-run/shopify-env-missing check quote.
+// Shopify variables, which google-cloud.md and the google-cloud/shopify-env-missing check quote.
 // Run with: npm test (from this folder)
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

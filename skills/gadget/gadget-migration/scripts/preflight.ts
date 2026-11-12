@@ -12,14 +12,14 @@ import { vercel } from "./checks/vercel.ts";
 import { render } from "./checks/render.ts";
 import { railway } from "./checks/railway.ts";
 import { flyIo } from "./checks/fly-io.ts";
-import { googleCloudRun } from "./checks/google-cloud-run.ts";
+import { googleCloud } from "./checks/google-cloud.ts";
 import { supabase } from "./checks/supabase.ts";
 import { cloudflare } from "./checks/cloudflare.ts";
 import { hookdeck } from "./checks/hookdeck.ts";
 import { inngest } from "./checks/inngest.ts";
 import { triggerDev } from "./checks/trigger-dev.ts";
 
-export const MODULES: CheckModule[] = [common, vercel, render, railway, flyIo, googleCloudRun, supabase, cloudflare, hookdeck, inngest, triggerDev];
+export const MODULES: CheckModule[] = [common, vercel, render, railway, flyIo, googleCloud, supabase, cloudflare, hookdeck, inngest, triggerDev];
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "build", "dist", ".react-router", ".cache", ".next", ".vercel", ".wrangler", ".gadget", "coverage", ".turbo"]);
 const SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$/;

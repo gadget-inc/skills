@@ -1,4 +1,4 @@
-// Typechecks the TypeScript in google-cloud-run.md with the packages it names, and runs the Cloud Tasks
+// Typechecks the TypeScript in google-cloud.md with the packages it names, and runs the Cloud Tasks
 // helpers' retry paths against a stubbed CloudTasksClient (Cloud Tasks has no emulator).
 // Run with: npm test (from this folder)
 import assert from "node:assert/strict";
@@ -10,9 +10,9 @@ import { block, typecheck, writeProject } from "../platform-blocks.ts";
 
 const here = import.meta.dirname;
 
-describe("google-cloud-run.md TypeScript", () => {
+describe("google-cloud.md TypeScript", () => {
   it("typechecks with @google-cloud/tasks 7.3.1, react-router 7.18.2, and TypeScript 5.9.3", () => {
-    const roots = writeProject("google-cloud-run.md", join(here, ".typecheck", "project"));
+    const roots = writeProject("google-cloud.md", join(here, ".typecheck", "project"));
     typecheck(here, roots, { types: ["node"] });
   });
 });
@@ -54,7 +54,7 @@ describe("app/tasks.server.ts against a stubbed client", () => {
     });
     const dir = join(here, ".typecheck", "run");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "tasks.server.ts"), block("google-cloud-run.md", "app/tasks.server.ts"));
+    writeFileSync(join(dir, "tasks.server.ts"), block("google-cloud.md", "app/tasks.server.ts"));
     tasks = await import(join(dir, "tasks.server.ts"));
   });
 

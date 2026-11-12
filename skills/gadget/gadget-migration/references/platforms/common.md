@@ -10,7 +10,7 @@ Gadget's guides for each platform repeat a handful of mistakes, because they hap
 | Render | [render.md](render.md) | https://docs.gadget.dev/guides/moving-to-another-platform/render |
 | Railway | [railway.md](railway.md) | https://docs.gadget.dev/guides/moving-to-another-platform/railway |
 | Fly.io | [fly-io.md](fly-io.md) | https://docs.gadget.dev/guides/moving-to-another-platform/fly-io |
-| Google Cloud Run | [google-cloud-run.md](google-cloud-run.md) | https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run |
+| Google Cloud | [google-cloud.md](google-cloud.md) | https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud |
 | Supabase | [supabase.md](supabase.md) | https://docs.gadget.dev/guides/moving-to-another-platform/supabase |
 | Cloudflare Workers | [cloudflare.md](cloudflare.md) | https://docs.gadget.dev/guides/moving-to-another-platform/cloudflare |
 | Hookdeck for webhooks | [hookdeck.md](hookdeck.md) | https://docs.gadget.dev/guides/moving-to-another-platform/hookdeck |

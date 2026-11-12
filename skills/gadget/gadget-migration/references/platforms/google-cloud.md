@@ -1,52 +1,52 @@
-# Google Cloud Run
+# Google Cloud
 
 ## What is this?
 
-On Google Cloud, the app becomes two Cloud Run services from one image: public `my-app-web`, and private `my-app-worker`, which Cloud Tasks, Cloud Scheduler, and Pub/Sub call with Google-signed tokens. Most failures here are a missing IAM role, a variable one service lacks, or two time limits that disagree, so this file is mostly scripts that set those up the same way in every project. Gadget's guide: https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run
+On Google Cloud, the app becomes two Cloud Run services from one image: public `my-app-web`, and private `my-app-worker`, which Cloud Tasks, Cloud Scheduler, and Pub/Sub call with Google-signed tokens. Most failures here are a missing IAM role, a variable one service lacks, or two time limits that disagree, so this file is mostly scripts that set those up the same way in every project. Gadget's guide: https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud
 
-For Cloud Run itself (services, jobs, deploying from source, base roles), load Google's `cloud-run-basics` skill: `npx skills add google/skills` and pick it (https://github.com/google/skills/tree/main/skills/cloud/cloud-run-basics). It has no environment variables, Secret Manager, Cloud Tasks, or Cloud Scheduler, so this file carries them. This file covers only what breaks or changes because the app came from Gadget.
+For Cloud Run and Cloud SQL themselves (services, jobs, deploying from source, instances, base roles), load Google's `cloud-run-basics` and `cloud-sql-basics` skills: `npx skills add google/skills` and pick them (https://github.com/google/skills/tree/main/skills/cloud). The same repo has `alloydb-basics` and `gke-basics` for the guide's alternatives. Google has no skill for environment variables, Secret Manager, Cloud Tasks, Cloud Scheduler, Pub/Sub, or Memorystore, so this file carries them. This file covers only what breaks or changes because the app came from Gadget.
 
 Read [common.md](common.md) first.
 
 ## Checks to run
 
 ```bash
-node path/to/skills/gadget-migration/scripts/preflight.ts path/to/new-app --platform google-cloud-run
+node path/to/skills/gadget-migration/scripts/preflight.ts path/to/new-app --platform google-cloud
 ```
 
 It reads `gcloud` commands in shell scripts, CI workflows, and `cloudbuild.yaml`, with the variables a script assigns, plus the app's Cloud Tasks and Cloud Storage code.
 
 | Check | What it catches | Command when the script can't see it |
 |---|---|---|
-| `google-cloud-run/shopify-env-missing` | A `gcloud run deploy` that replaces the variables and secrets without `SHOPIFY_APP_URL`, `SHOPIFY_API_KEY`, or `SHOPIFY_API_SECRET` | `gcloud run services describe my-app-worker --region=us-central1 --format=yaml` lists `env` |
-| `google-cloud-run/timeout-deadline` | A dispatch deadline shorter than the worker's `--timeout` (two copies run), or longer (504 and retry). Only a warning when the deadline is already Cloud Tasks' 30-minute maximum, and a check by hand when the deadline isn't a number or a constant in the same file | `gcloud run services describe my-app-worker --region=us-central1 --format="value(spec.template.spec.timeoutSeconds)"` |
-| `google-cloud-run/iam-roles` | A role the code or commands need that the repo's IAM script or Terraform never grants, or, with no IAM setup in the repo, the list of roles to check | `gcloud projects get-iam-policy my-app-production --flatten=bindings --filter="bindings.members:serviceAccount:my-app-web@my-app-production.iam.gserviceaccount.com" --format="value(bindings.role)"` |
-| `google-cloud-run/migrate-before-deploy` | A migration job that never runs, runs without `--wait`, or runs in a script without `set -e` | |
-| `google-cloud-run/migrate-on-start` | A start script that runs `prisma db push` or `migrate deploy`, as in Shopify's Cloud Run guide | |
-| `google-cloud-run/prisma-generate` | A `CMD` (or its start script) that doesn't run `prisma generate`, with none in the Dockerfile either | |
-| `google-cloud-run/secret-latest` | A secret read as `latest` | |
-| `google-cloud-run/task-route-public` | A `tasks.*`, `schedules.*`, or `pubsub.*` route with no `K_SERVICE` check, which the public service also serves | |
-| `google-cloud-run/delete-queue` | `deleteQueue`, which blocks the name for 3 days | |
-| `google-cloud-run/pubsub-expiration` | A subscription without `--expiration-period`, deleted after 31 quiet days | `gcloud pubsub subscriptions describe shopify-webhooks-worker --format="yaml(expirationPolicy)"` |
-| `google-cloud-run/owner-skips-rls` | SQL migrations that turn on row-level security, while the migration job and a service read `DATABASE_URL` from the same secret, so the services connect as the tables' owner | `psql "host=127.0.0.1 dbname=my-app user=app_user" -f path/to/skills/gadget-migration/scripts/db-check.sql` through the Cloud SQL Auth Proxy |
-| `google-cloud-run/migrate-shared-account` | A migration job that runs as the same service account as a service, so that service's account can read the owner's URL in the migration secret | `gcloud secrets get-iam-policy migrate-database-url --project=my-app-production` should list only `my-app-migrate` |
-| `google-cloud-run/sql-user-create` | `gcloud sql users create`, which gives the user `CREATEROLE` and `CREATEDB` and adds it to `cloudsqlsuperuser` | |
-| `google-cloud-run/instance-limits` | A public service deployed without `--min` or `--max` | `gcloud run services describe my-app-web --region=us-central1 --format=yaml` shows the `minScale` and `maxScale` annotations |
+| `google-cloud/shopify-env-missing` | A `gcloud run deploy` that replaces the variables and secrets without `SHOPIFY_APP_URL`, `SHOPIFY_API_KEY`, or `SHOPIFY_API_SECRET` | `gcloud run services describe my-app-worker --region=us-central1 --format=yaml` lists `env` |
+| `google-cloud/timeout-deadline` | A dispatch deadline shorter than the worker's `--timeout` (two copies run), or longer (504 and retry). Only a warning when the deadline is already Cloud Tasks' 30-minute maximum, and a check by hand when the deadline isn't a number or a constant in the same file | `gcloud run services describe my-app-worker --region=us-central1 --format="value(spec.template.spec.timeoutSeconds)"` |
+| `google-cloud/iam-roles` | A role the code or commands need that the repo's IAM script or Terraform never grants, or, with no IAM setup in the repo, the list of roles to check | `gcloud projects get-iam-policy my-app-production --flatten=bindings --filter="bindings.members:serviceAccount:my-app-web@my-app-production.iam.gserviceaccount.com" --format="value(bindings.role)"` |
+| `google-cloud/migrate-before-deploy` | A migration job that never runs, runs without `--wait`, or runs in a script without `set -e` | |
+| `google-cloud/migrate-on-start` | A start script that runs `prisma db push` or `migrate deploy`, as in Shopify's Cloud Run guide | |
+| `google-cloud/prisma-generate` | A `CMD` (or its start script) that doesn't run `prisma generate`, with none in the Dockerfile either | |
+| `google-cloud/secret-latest` | A secret read as `latest` | |
+| `google-cloud/task-route-public` | A `tasks.*`, `schedules.*`, or `pubsub.*` route with no `K_SERVICE` check, which the public service also serves | |
+| `google-cloud/delete-queue` | `deleteQueue`, which blocks the name for 3 days | |
+| `google-cloud/pubsub-expiration` | A subscription without `--expiration-period`, deleted after 31 quiet days | `gcloud pubsub subscriptions describe shopify-webhooks-worker --format="yaml(expirationPolicy)"` |
+| `google-cloud/owner-skips-rls` | SQL migrations that turn on row-level security, while the migration job and a service read `DATABASE_URL` from the same secret, so the services connect as the tables' owner | `psql "host=127.0.0.1 dbname=my-app user=app_user" -f path/to/skills/gadget-migration/scripts/db-check.sql` through the Cloud SQL Auth Proxy |
+| `google-cloud/migrate-shared-account` | A migration job that runs as the same service account as a service, so that service's account can read the owner's URL in the migration secret | `gcloud secrets get-iam-policy migrate-database-url --project=my-app-production` should list only `my-app-migrate` |
+| `google-cloud/sql-user-create` | `gcloud sql users create`, which gives the user `CREATEROLE` and `CREATEDB` and adds it to `cloudsqlsuperuser` | |
+| `google-cloud/instance-limits` | A public service deployed without `--min` or `--max` | `gcloud run services describe my-app-web --region=us-central1 --format=yaml` shows the `minScale` and `maxScale` annotations |
 | Traffic pinned by a rollback | The newest revision gets no traffic | `gcloud run services describe my-app-web --region=us-central1 --format="yaml(status.traffic)"` should show `latestRevision: true` at `percent: 100` |
 
 ## Failure signatures
 
 | You see | Cause | Fix |
 |---|---|---|
-| `Detected an empty appUrl configuration`, `Missing values for: apiKey`, or `Missing values for: apiSecretKey`, and no revision becomes ready | A service or job that imports `shopify.server.ts` lacks `SHOPIFY_APP_URL`, `SHOPIFY_API_KEY`, or `SHOPIFY_API_SECRET` | Put them in the env vars file and secrets every service uses ([Run migrations once per deploy](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#run-migrations-once-per-deploy)) |
-| A task's attempt ends `DEADLINE_EXCEEDED` while its logs show the job still running, then a second copy starts | The dispatch deadline is shorter than the job and the worker's `--timeout` | Raise both above the longest job ([Check your host's time limits](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#check-your-host-s-time-limits)) |
+| `Detected an empty appUrl configuration`, `Missing values for: apiKey`, or `Missing values for: apiSecretKey`, and no revision becomes ready | A service or job that imports `shopify.server.ts` lacks `SHOPIFY_APP_URL`, `SHOPIFY_API_KEY`, or `SHOPIFY_API_SECRET` | Put them in the env vars file and secrets every service uses ([Run migrations once per deploy](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#run-migrations-once-per-deploy)) |
+| A task's attempt ends `DEADLINE_EXCEEDED` while its logs show the job still running, then a second copy starts | The dispatch deadline is shorter than the job and the worker's `--timeout` | Raise both above the longest job ([Check your host's time limits](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#check-your-host-s-time-limits)) |
 | Every attempt of a long job fails with `504` at 5 minutes | The worker kept Cloud Run's default `--timeout` | `--timeout=15m` on the worker, matching the dispatch deadline |
 | `PERMISSION_DENIED` naming `cloudtasks.queues.create` on install | Cloud Tasks Enqueuer can't create queues | `roles/cloudtasks.queueAdmin` on the account that creates them |
-| `SigningError: Permission 'iam.serviceAccounts.signBlob' denied on resource (or it may not exist).` | Signing a URL on Cloud Run goes through IAM, and the account can't sign as itself | Token Creator on its own account ([Search, files, and other services](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#search-files-and-other-services)) |
-| `createTask` fails with code `5` (`NOT_FOUND`) for one store | That store's queue was never created, such as for a store installed under Gadget, or it is reactivating after 30 idle days | `enqueueForShop` below creates it and retries ([Limit concurrency per store](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#limit-concurrency-per-store)) |
+| `SigningError: Permission 'iam.serviceAccounts.signBlob' denied on resource (or it may not exist).` | Signing a URL on Cloud Run goes through IAM, and the account can't sign as itself | Token Creator on its own account ([Search, files, and other services](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#search-files-and-other-services)) |
+| `createTask` fails with code `5` (`NOT_FOUND`) for one store | That store's queue was never created, such as for a store installed under Gadget, or it is reactivating after 30 idle days | `enqueueForShop` below creates it and retries ([Limit concurrency per store](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#limit-concurrency-per-store)) |
 | The fix you deployed after a rollback never gets traffic | `update-traffic --to-revisions` pinned traffic | `gcloud run services update-traffic my-app-web --to-latest --region=us-central1` |
-| A query with no store set returns every store's rows, and `scripts/db-check.sql` as the app's role reports `owns tables with row-level security` | The services read the migration job's secret, so they connect as the user that ran migrations and owns the tables | A second secret, `migrate-database-url`, for the migration job, and the URL of an app role you create with SQL in `database-url` (`google-cloud-run/owner-skips-rls`, [Rewrite permissions and shop tenancy](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#rewrite-permissions-and-shop-tenancy)) |
-| A webhook answered `200` but its order was never saved | Work after the response gets no CPU with request-based billing | Create the task before responding ([Receive webhooks](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#receive-webhooks)) |
+| A query with no store set returns every store's rows, and `scripts/db-check.sql` as the app's role reports `owns tables with row-level security` | The services read the migration job's secret, so they connect as the user that ran migrations and owns the tables | A second secret, `migrate-database-url`, for the migration job, and the URL of an app role you create with SQL in `database-url` (`google-cloud/owner-skips-rls`, [Rewrite permissions and shop tenancy](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#rewrite-permissions-and-shop-tenancy)) |
+| A webhook answered `200` but its order was never saved | Work after the response gets no CPU with request-based billing | Create the task before responding ([Receive webhooks](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#receive-webhooks)) |
 
 ## Complete examples
 
@@ -129,7 +129,7 @@ FILES_BUCKET: my-app-production-files
 
 `staging.env.yaml` has the same keys with staging's values.
 
-The IAM script creates the secrets but not the app's database role. Create `app_user` with SQL as [Rewrite permissions and shop tenancy](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#rewrite-permissions-and-shop-tenancy) shows, then put its URL in `database-url` and the `postgres` URL in `migrate-database-url`.
+The IAM script creates the secrets but not the app's database role. Create `app_user` with SQL as [Rewrite permissions and shop tenancy](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#rewrite-permissions-and-shop-tenancy) shows, then put its URL in `database-url` and the `postgres` URL in `migrate-database-url`.
 
 The deploy, with the guide's order (one image, migrations once, worker before web) and the two traffic commands that undo a pinned rollback:
 
@@ -286,7 +286,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 ```
 
-Callers use ``enqueueForShop(shopId, "tasks/notify-external-system", { orderId }, { key: `notify-${orderId}` })``. It's the guide's [`enqueueForShop`](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#limit-concurrency-per-store) on top of this file's `enqueue`, which takes a path and a `key` it hashes into the task name. Every action that used `external-${shopId}` on Gadget calls `enqueueForShop` with its own route, so together they get the store's 2 dispatches, as they shared Gadget's limit.
+Callers use ``enqueueForShop(shopId, "tasks/notify-external-system", { orderId }, { key: `notify-${orderId}` })``. It's the guide's [`enqueueForShop`](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#limit-concurrency-per-store) on top of this file's `enqueue`, which takes a path and a `key` it hashes into the task name. Every action that used `external-${shopId}` on Gadget calls `enqueueForShop` with its own route, so together they get the store's 2 dispatches, as they shared Gadget's limit.
 
 The stores that installed the app under Gadget never run the new install code, so create their queues before the switch. A new queue can take a few minutes to become available, longer than `enqueueForShop`'s two retries wait. `createShopQueue` ignores a queue that exists, so the script can run again:
 
@@ -309,15 +309,15 @@ for (let i = 0; i < shops.length; i += 10) {
 await prisma.$disconnect();
 ```
 
-The guide's [signed URL helpers](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#search-files-and-other-services) work as written once the IAM script has run.
+The guide's [signed URL helpers](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#search-files-and-other-services) work as written once the IAM script has run.
 
 ## Cutover
 
-The order in [cutover.md](../cutover.md) and the guide's [cutover section](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#cut-over-to-the-new-platform) holds. On Google Cloud:
+The order in [cutover.md](../cutover.md) and the guide's [cutover section](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#cut-over-to-the-new-platform) holds. On Google Cloud:
 
 - **Scheduler jobs run as soon as they exist.** Create them paused (`gcloud scheduler jobs create http ...` then `gcloud scheduler jobs pause prune-audit-logs --location=us-central1`) and resume them in the "Move scheduled work" step.
 - **Per-store queues for existing stores.** Run `scripts/create-shop-queues.ts` before the switch, and again after the catch-up load, for stores that installed in between. `enqueueForShop` covers a store missed after that. A project has [1,000 queues per region](https://docs.cloud.google.com/tasks/docs/quotas) by default, so an app on more stores than that asks for a quota increase first.
-- **Load records as `postgres`.** Run the load script with the user and password from `migrate-database-url`, through the Cloud SQL Auth Proxy, because it writes every store's rows without setting `app.shop_id` ([Rewrite permissions and shop tenancy](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud-run#rewrite-permissions-and-shop-tenancy)).
+- **Load records as `postgres`.** Run the load script with the user and password from `migrate-database-url`, through the Cloud SQL Auth Proxy, because it writes every store's rows without setting `app.shop_id` ([Rewrite permissions and shop tenancy](https://docs.gadget.dev/guides/moving-to-another-platform/google-cloud#rewrite-permissions-and-shop-tenancy)).
 - **Deploys don't cut off jobs.** Requests in progress finish on the old revision. An instance stopped for other reasons gets 10 seconds after `SIGTERM`, so the task's retry is what saves the job.
 - **Rollback:** `gcloud run services update-traffic my-app-web --to-revisions=<revision>=100`, then the next `scripts/deploy.sh` moves traffic back to the latest. It doesn't undo migrations.
 
