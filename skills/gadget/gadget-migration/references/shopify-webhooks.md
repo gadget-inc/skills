@@ -46,6 +46,44 @@ Without the template, verify with `verifyWebhook` from [shopify-signatures.md](s
 
 If the app has no queue, Shopify can deliver to Google Cloud Pub/Sub or Amazon EventBridge instead: set the subscription's `uri` in `shopify.app.toml` to `pubsub://<project-id>:<topic-id>` or an EventBridge event source ARN. That removes the 5-second limit from your servers. These deliveries carry no HMAC, and Pub/Sub can deliver a message more than once, so the duplicate check below still applies.
 
+## Or let Hookdeck answer Shopify
+
+Hookdeck is a hosted webhook gateway that keeps HTTPS delivery. Shopify delivers to a Hookdeck source, Hookdeck answers Shopify, and then it delivers to your app and waits 60 seconds by default, up to 15 minutes per destination. The route can then do the work before it responds, without a job queue for webhook retries. Hookdeck only needs an HTTPS route, so this works whatever framework, database client, or queue the app uses. Gadget's guide has the full setup: https://docs.gadget.dev/guides/moving-to-another-platform/hookdeck
+
+Set it up like this:
+
+- **Source:** type `SHOPIFY`, with the app's client secret. With the CLI, pass it as `--source-config "{\"auth\":{\"webhook_secret_key\":\"$SHOPIFY_API_SECRET\"}}"`. Don't use `--source-webhook-secret`: for every source type except Stripe it sets up a hex check on an `x-webhook-signature` header, which Shopify never sends, and Hookdeck's Shopify source schema only accepts `webhook_secret_key`. A delivery whose signature doesn't match gets a 401 and is recorded as `VERIFICATION_FAILED`. With the wrong secret, such as the development app's, Shopify retries each webhook for 4 hours and removes a subscription whose deliveries keep failing.
+- **`uri` and destination:** Hookdeck forwards the path after the source URL. Put the route's path in the TOML `uri`, such as `https://hkdk.events/<source-id>/webhooks/orders/updated`, and only the app's origin in the destination URL. A destination URL that also has the path receives `/webhooks/orders/updated/webhooks/orders/updated` and gets a 404.
+- **Retry rule:** add one. Exponential from 60,000 ms with 10 retries doubles the wait each time, so the retries cover at least 8.5 hours. Retry every response outside the 200 range, not only 5xx, so a 404 from a wrong path recovers once you fix it.
+- **Deduplication rule:** include the field `headers.x-shopify-webhook-id`, with the maximum window of 1 hour. The window is in milliseconds (`3600000`) in the API and in the CLI's `--rules` JSON. The CLI's `--rule-deduplicate-window` help says seconds but passes the value to the API unchanged, so `3600` there is 3.6 seconds. Keep the `processed_webhook` check below anyway. Shopify can resend after an hour, and Hookdeck retries a delivery whose response it never got.
+- **Delivery groups:** a key of `headers.x-shopify-shop-domain` gives each store its own rate. Group rates are per second, minute, or hour, not a concurrency limit.
+
+Hookdeck forwards Shopify's body and headers unchanged, so whatever checks Shopify's HMAC in the app still works, whether that's `authenticate.webhook` from Shopify's app template, `shopify.webhooks.validate` from `@shopify/shopify-api`, or `verifyWebhook`. Don't add a Hookdeck transformation that changes the body: even reformatted whitespace fails that check on every delivery. Hookdeck also signs each request in `x-hookdeck-signature`, plus `x-hookdeck-signature-2` while a rolled secret is still active. It's the same algorithm as Shopify's, a base64 HMAC-SHA256 of the raw body, keyed with the Hookdeck project's signing secret, so `verifyWebhook` checks it too. The example below is a route in Shopify's app template; on another framework, run the same check on the raw body before the Shopify check:
+
+```typescript
+// in app/routes/webhooks.orders.updated.tsx
+const rawBody = new Uint8Array(await request.clone().arrayBuffer());
+const secret = process.env.HOOKDECK_WEBHOOK_SECRET!;
+const fromHookdeck =
+  (await verifyWebhook(rawBody, request.headers.get("x-hookdeck-signature"), secret)) ||
+  (await verifyWebhook(rawBody, request.headers.get("x-hookdeck-signature-2"), secret));
+if (!fromHookdeck) return new Response(undefined, { status: 401 });
+
+// authenticate.webhook reads the original body, so the copy above leaves it intact
+const { shop, payload, webhookId } = await authenticate.webhook(request);
+```
+
+What Hookdeck doesn't change:
+
+- **Order.** Its retries and rate limits reorder webhooks further, so keep the `updated_at` check.
+- **Missed webhooks.** A webhook Shopify never sends never reaches Hookdeck, so keep the reconciliation in [shopify-sync.md](shopify-sync.md).
+- **Admin requests.** Hookdeck answers every request itself and can't return your app's response, so the app URL, app proxy, and extension routes go to the app directly.
+- **Per-store subscriptions Gadget created.** They deliver to Gadget until you delete them, as in [cutover.md](cutover.md).
+
+For a store-by-store cutover, filters on `x-shopify-shop-domain` can route each store's webhooks to Gadget or to the new app, which replaces the webhook half of a forwarding layer. A filter change only applies to webhooks received after it, so wait for a store's queued deliveries to Gadget to finish before moving its tokens. Every write to a connection's rules replaces the whole array, through the API and through the CLI's filter flags, so resend all of them with each filter change: a write with only the header filter drops the retry and deduplication rules, and on a Gadget connection also the path filter, which shares one filter rule with the header filter. Gadget answers a webhook as soon as it queues a background action for it, so an empty Hookdeck queue only means Gadget received them: also wait until Gadget's Queues dashboard has no Shopify webhooks received before that point waiting, running, or retrying. Keep the new app's webhook `api_version` equal to the Gadget app's until every store has moved, because Gadget processes a payload from another API version without converting it. Gadget's webhook routes only answer requests whose `Host` is Gadget's webhook domain, and Hookdeck's docs don't say which `Host` a delivery carries, so test each Gadget connection before the switch deploy: send a sample with `shopify app webhook trigger` to the production source URL and check that the event's response is Gadget's `404` saying `cannot handle topic orders/updated for shop`, which it sends for a store it doesn't have. Any other response means the connection doesn't reach Gadget. The guide has the order.
+
+Limits that matter at Shopify volume: Hookdeck counts every webhook it receives, so an app on 300 stores that gets 10 a day from each sends it about 90,000 a month. Each destination delivers no faster than the project's throughput, and deliveries above it queue instead of dropping: at 5 events per second, 20,000 `products/update` webhooks from one bulk edit take about 67 minutes. Hookdeck deletes events after a retention period, and retries and replays only work before then. The monthly event allowance, throughput, and retention all come from the user's Hookdeck plan, and Hookdeck changes its plans, so don't quote plan limits or estimate costs. Have the user compare their busiest month of webhooks with https://hookdeck.com/pricing.
+
 ## Drop duplicate deliveries
 
 A queue's deduplication covers deliveries that arrive while the job is known to the queue. For a guarantee that outlives the queue, record the webhook id in the same transaction as the write:
@@ -225,7 +263,7 @@ Gadget uses per-store subscriptions for models with metafield fields because sub
 
 ## Common pitfalls
 
-- **Doing the work before responding.** Anything slower than 5 seconds is processed twice.
+- **Doing the work before responding.** Anything slower than 5 seconds is processed twice, unless a gateway such as Hookdeck answers Shopify for you.
 - **A redirect on the webhook URL.** A trailing-slash or `www` redirect counts as a failed delivery. Give Shopify the final URL.
 - **Recording the webhook id outside the write's transaction.** A failed job then marks a webhook processed that never was.
 - **Checking `updated_at` in a separate `select`.** Two workers can both pass the check and the older one can write last. Put the check in the `where` of the upsert.
