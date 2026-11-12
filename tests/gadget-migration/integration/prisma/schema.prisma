@@ -1,4 +1,5 @@
-// Only the tables the Prisma snippets in references/shop-tenancy.md touch. tenancy.integration.ts creates them.
+// Only the tables the Prisma snippets in references/shop-tenancy.md and references/actions-and-transactions.md
+// touch. tenancy.integration.ts creates them.
 generator client {
   provider = "prisma-client-js"
 }
@@ -16,4 +17,12 @@ model AuditLog {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@map("audit_log")
+}
+
+model ShopifyOrder {
+  id         BigInt  @id
+  shopId     BigInt  @map("shop_id")
+  totalPrice Decimal @map("total_price") @db.Decimal(12, 2)
+
+  @@map("shopify_order")
 }

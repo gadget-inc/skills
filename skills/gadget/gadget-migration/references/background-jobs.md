@@ -9,7 +9,7 @@ Background actions are actions Gadget ran later, outside the request that queued
 | `api.enqueue` option | What Gadget did | BullMQ | Cloud Tasks | Inngest | Trigger.dev |
 |---|---|---|---|---|---|
 | `retries` | 6 retries by default, 1 s apart and doubling, no jitter | `attempts: 7, backoff: { type: "exponential", delay: 1000 }` | Queue retry config: `maxAttempts`, `minBackoff`, `maxDoublings` | `retries` on the function, 0 to 20, with Inngest's own backoff | `retry: { maxAttempts: 7, factor: 2, minTimeoutInMs: 1000, randomize: false }` |
-| `queue: { name, maxConcurrency }` | At most `maxConcurrency` jobs from that queue name at once: 1 by default, 100 at most | No per-key limit in the free version (see below) | `maxConcurrentDispatches`, per queue only | `concurrency: { limit, key }` | `concurrency: { perKey }` plus `concurrencyKey` |
+| `queue: { name, maxConcurrency }` | At most `maxConcurrency` jobs from that queue name at once: 1 by default, 100 at most | No per-key limit in the free version (see below) | `maxConcurrentDispatches`, per queue only | `concurrency: { limit, key }`, with `scope: "env"` and one key for every function on the same queue name | `concurrency: { perKey }` plus `concurrencyKey`, or one shared `queue({ concurrencyLimit })` for tasks on the same queue name |
 | `priority` | `high` before `default` before `low` | `priority: 1`, `2`, `3` on every job (see below) | None: use a separate queue | `priority: { run }`, an expression in seconds from -600 to 600 | `priority` when triggering, in seconds |
 | `startAt` | Runs at a future time | `delay` in ms | `scheduleTime` | `step.sleepUntil` | `delay` |
 | `id` with `onDuplicateID` | Throws `GGT_DUPLICATE_BACKGROUND_ACTION_ID` for a second job with the same id, or returns the first job with `onDuplicateID: "ignore"`, until 1 day after the first succeeds or 7 days after it fails or is cancelled | `deduplication: { id, ttl }` | Task name, reserved for up to 24 hours after the task finishes | Event `id`, for 24 hours | `idempotencyKey` with `idempotencyKeyTTL: "1d"` (the default is 30 days) |
@@ -82,6 +82,8 @@ await notifyExternalSystem.trigger({ orderId, shopId }, { concurrencyKey: shopId
 
 The Inngest function was run against the Inngest dev server: with 6 events for one store and 2 for another, each store never had more than 2 steps running, a failed step was retried, and the step before it did not run again. Inngest's limit counts steps that are running, so a function that is sleeping or waiting between steps doesn't hold a slot. The Trigger.dev task follows its documentation and wasn't run.
 
+Gadget counted the limit across every action that used the queue name. An Inngest `key` or a Trigger.dev `perKey` counts one function or task, so two of them with a limit of 2 ran 4 jobs for one store at once. The inventory marks each `api.enqueue` call that passes `queue` but doesn't print the name, so read those calls. When two of them pass the same `queue.name`, give every Inngest function that replaces them `concurrency: { scope: "env", key: '"external-" + event.data.shopId', limit: 2 }`, or list one `queue({ name: "external", concurrencyLimit: 2 })` as `queue` on every Trigger.dev task and pass the store's id as `concurrencyKey` on each trigger. Gadget's [Inngest](https://docs.gadget.dev/guides/moving-to-another-platform/inngest#share-a-limit-between-functions) and [Trigger.dev](https://docs.gadget.dev/guides/moving-to-another-platform/trigger-dev#share-a-limit-between-tasks) guides ran both forms: each held one store to 2 jobs across two functions or tasks. A named Trigger.dev `concurrencyLimit()` shared by two tasks did not.
+
 BullMQ has per-group limits only in BullMQ Pro. With open-source BullMQ, gate each job on a Postgres advisory lock per store and slot, and put the job back in the queue when every slot is taken:
 
 ```typescript
@@ -143,7 +145,7 @@ export const options: ActionOptions = {
 becomes a cron job with the schedule `0 2 * * *` that calls the same function. Gadget's scheduler made three promises, and not every replacement keeps them:
 
 - **At most once a minute, starting within 10 seconds of the scheduled time.** Railway cron jobs must be at least 5 minutes apart. Vercel Schedules, in beta, start each run within a window after the scheduled time, and the window and how often a schedule can run depend on your plan ([Vercel's Schedules docs](https://vercel.com/docs/schedules)).
-- **No overlapping runs.** Gadget skipped a run while the previous one was still going. Railway skips too, and Render delays the next run until the current one finishes. Vercel can start overlapping runs, and Vercel and Cloud Scheduler can deliver the same run twice.
+- **No overlapping runs.** Gadget skipped a run while the previous one was still going. Railway skips too, and Render delays the next run until the current one finishes. Vercel can start overlapping runs, and Vercel and Cloud Scheduler can deliver the same run twice. Those hosts protect only the cron command, so once it only adds a job to your queue, two jobs can run at once on a worker whose concurrency is above 1.
 - **Retries.** Gadget retried a failed run, up to 5 attempts. Vercel doesn't retry a run that targets a function or a path. Cloud Scheduler doesn't retry unless you set a retry count on the job, which is 0 by default. Render's and Railway's documentation promise no retry. Without one, a failed nightly job waits a whole day.
 
 For retries, keep the cron job small: have it add one job to your queue, and let the queue's retries do the rest. With BullMQ you can drop the host's cron and let the queue schedule the job. `upsertJobScheduler` is safe to call from every process at boot, because a second call with the same id replaces the schedule instead of adding another:
@@ -157,7 +159,7 @@ await maintenanceQueue.upsertJobScheduler(
 );
 ```
 
-Where runs can overlap or repeat, take a transaction-level advisory lock at the start and exit when another run holds it:
+In the job the queue runs, on every host, take a transaction-level advisory lock at the start and exit when another run holds it. Without a queue, put the same lock in the cron job wherever the host can overlap or repeat runs:
 
 ```typescript
 // in app/cron/pruneAuditLogs.server.ts
@@ -203,7 +205,7 @@ Let Gadget finish the background actions already queued, and watch the Queues da
 - **No `attempts` in BullMQ.** The first error fails the job for good.
 - **One shared concurrency limit.** Every store waits behind the busiest one, and a backfill for one store blocks webhook work for all of them.
 - **Jobs that can't run twice.** Every queue retries. Increments and "send email" steps need an idempotency key.
-- **Assuming the scheduler skips overlaps or retries.** Check the host's rules, and add the lock.
+- **Assuming the scheduler skips overlaps or retries.** Check the host's rules, and put the lock in the job that does the work. Once the cron job only adds a job to your queue, that is the queued job, whatever the host promises about the cron command.
 - **Queuing inside the database transaction.** A rollback doesn't take the job back, and the worker can pick the job up before the commit and not find the row.
 - **A host timeout shorter than the job.** The job fails at the same point on every retry. Check the host's request timeout as well as the queue's.
 - **A priority on some jobs only.** In BullMQ the jobs with no priority run first.

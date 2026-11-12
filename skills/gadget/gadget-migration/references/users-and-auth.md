@@ -29,6 +29,8 @@ The export file holds every user's password hash. Keep it off shared drives and 
 
 Each provider takes the hash in a different field. In all of them, import one user whose password you know, sign in as that user, and only then import the rest.
 
+Run the import once, after writes to Gadget stop, as in the "Cutover without Shopify" section of [non-shopify-apps.md](non-shopify-apps.md#cutover-without-shopify). A second run that only creates users leaves each existing user with the first export's hash and roles, and on Supabase `updateUserById` with a new `password_hash` does not change the password either. If you import early to test, delete those users before the final run. Firebase's `importUsers` is the exception, because it replaces a user whose `uid` exists.
+
 ### Supabase Auth
 
 ```typescript
@@ -199,7 +201,7 @@ Gadget's `signUp` action created the `user` record and ran the code the app adde
 
 | Provider | New-user hook |
 |---|---|
-| Supabase Auth | A Postgres trigger `after insert on auth.users` ([managing user data](https://supabase.com/docs/guides/auth/managing-user-data)). If the trigger fails, the sign-up fails. A new user has no `gadget_user_id`, so give that column a sequence moved past the imported ids ([schema-mapping.md](schema-mapping.md)), and the trigger's insert takes the next one |
+| Supabase Auth | A Postgres trigger `after insert on auth.users` ([managing user data](https://supabase.com/docs/guides/auth/managing-user-data)). If the trigger fails, the sign-up fails. A new user has no `gadget_user_id`, so give that column a sequence moved past the imported ids ([schema-mapping.md](schema-mapping.md)), and the trigger's insert takes the next one. Also write that id and the default roles into the user's `app_metadata`, the `raw_app_meta_data` column, because Data API policies read the token and not your table. A token issued before that write carries neither, so the user reads nothing until the session refreshes. Gadget's Supabase guide sets both from server code in [Move app users and sessions](https://docs.gadget.dev/guides/moving-to-another-platform/supabase#move-app-users-and-sessions) |
 | Clerk | The `user.created` webhook ([syncing data](https://clerk.com/docs/guides/development/webhooks/syncing)). Clerk calls this sync eventually consistent, so the user's first request can arrive before the row exists |
 | Auth0 | The Post User Registration trigger ([trigger docs](https://auth0.com/docs/customize/actions/explore-triggers/post-user-registration)). Its docs name database and passwordless connections only, and it can't stop the sign-up, so test a Google sign-up separately |
 | Better Auth | `databaseHooks.user.create.after` in `betterAuth({ ... })` ([database docs](https://better-auth.com/docs/concepts/database)) |

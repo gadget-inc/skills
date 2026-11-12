@@ -204,7 +204,7 @@ const deleted = await deleteMissing(pool, {
 console.log(`deleted ${deleted.length} orders from shop ${shopId}`, deleted.map(String));
 ```
 
-Start each list after webhooks stop reaching Gadget. A record deleted while the list runs, after the query already read it, stays in the list, and if its delete webhook went to Gadget nothing removes it. In a staged move, sweep each store after its own switch. Gadget ran its delete action when each of these webhooks arrived, so delete the rows without the side effects your delete handler adds. Child rows such as line items go with their parent only through `on delete cascade`; otherwise sweep their table too. Keep the logged ids: if a list turns out wrong, they are the records to restore from your export.
+Start each list after webhooks stop reaching Gadget. If the app has per-store subscriptions, that needs them moved for every store, in step 6 of [cutover.md](cutover.md). A record deleted while the list runs, after the query already read it, stays in the list, and if its delete webhook went to Gadget nothing removes it. In a staged move, sweep each store after its own switch. Gadget ran its delete action when each of these webhooks arrived, so delete the rows without the side effects your delete handler adds. Child rows such as line items go with their parent only through `on delete cascade`; otherwise sweep their table too. Keep the logged ids: if a list turns out wrong, they are the records to restore from your export.
 
 ## Pace calls to each store
 

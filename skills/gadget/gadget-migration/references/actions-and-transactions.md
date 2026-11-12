@@ -35,18 +35,22 @@ export async function handleOrderCreated(shopId: bigint, order: OrderWebhookPayl
   await prisma.$transaction(
     async (tx) => {
       await tx.$executeRaw`select set_config('app.shop_id', ${shopId.toString()}, true)`; // shop tenancy, see shop-tenancy.md
-      await tx.shopifyOrder.create({ data: { id: BigInt(order.id), shopId, totalPrice: order.total_price } });
-      await tx.auditLog.create({ data: { event: "orderCreated", orderId: BigInt(order.id), shopId } });
+      // a retry after the commit finds the order already saved and skips both writes
+      const { count } = await tx.shopifyOrder.createMany({
+        data: [{ id: BigInt(order.id), shopId, totalPrice: order.total_price }],
+        skipDuplicates: true,
+      });
+      if (count === 1) await tx.auditLog.create({ data: { event: "orderCreated", orderId: BigInt(order.id), shopId } });
     },
     { timeout: 8_000 } // Prisma's default is 5 seconds, shorter than Gadget's 8
   );
 
-  // after the commit, like onSuccess
+  // after the commit, like onSuccess, and on every retry, where the jobId stops a second job
   await externalQueue.add("notifyExternalSystem", { orderId: String(order.id), shopId: String(shopId) }, { jobId: `order-${order.id}`, attempts: 7, backoff: { type: "exponential", delay: 1000 } });
 }
 ```
 
-The order and its audit log save together or not at all, and the job is only queued after both are saved.
+The order and its audit log save together or not at all, and the job is only queued after both are saved. A retry after the commit finds the order saved, skips both writes, and reaches the `add`, where the `jobId` stops a second job. With a plain `create`, a webhook job whose `add` failed after the commit throws on the order's id on every retry, and the job is never queued.
 
 ### ❌ Calling out from inside the transaction
 

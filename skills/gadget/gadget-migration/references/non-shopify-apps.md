@@ -107,14 +107,14 @@ Go through the permissions file role by role, including `unauthenticated`. Every
 
 No platform switches traffic for you, so the cutover is a DNS change or a release:
 
-1. **Freeze writes or accept a gap.** Records written to Gadget after your export are missing from the new database. Either put the Gadget app in a read-only mode for the final export (remove write grants from the roles and deploy), or run a second export filtered on `updatedAt` since the first and upsert it.
-2. **Run the final export and load it.** Move the id sequences ([schema-mapping.md](schema-mapping.md)).
-3. **Turn off Gadget's scheduled actions and let its queue drain**, then turn on the new cron jobs.
-4. **Switch traffic.** On a custom domain, change the DNS record to the new host. Lower the record's TTL a day ahead so the change takes minutes, not hours. On a `gadget.app` domain there is nothing to repoint: every caller and every link has to change to the new URL ([external-api-clients.md](external-api-clients.md)).
+1. **Stop writes in Gadget.** Ahead of time, deploy a check on an environment variable in your routes and in the actions your frontends call. Then set the variable, and turn off Gadget's scheduled actions in the same step. New frontends are not enough, because open pages and older versions of a mobile app keep calling Gadget. Removing write grants from the roles is not enough either: scheduled actions and code that calls `api` with admin access keep writing.
+2. **Let Gadget's queue drain.** Background actions queued before the stop still write, so wait for the Queues dashboard to empty before the export ([background-jobs.md](background-jobs.md#moving-jobs-at-cutover)).
+3. **Export what changed and load it.** Run the catch-up export filtered on `updatedAt` since the first export, upsert it, and move the id sequences ([data-export.md](data-export.md#catch-up-on-records-that-change-during-the-export), [schema-mapping.md](schema-mapping.md#move-sequences-after-loading)). Import users now too ([users-and-auth.md](users-and-auth.md#import-the-hashes)). Stopping writes and this export are both required: an export while Gadget still writes misses records changed after their page was read, and a stop without this export loses everything changed since the first one.
+4. **Switch traffic and turn on the new cron jobs.** On a custom domain, change the DNS record to the new host. Lower the record's TTL a day ahead so the change takes minutes, not hours. On a `gadget.app` domain there is nothing to repoint: every caller and every link has to change to the new URL ([external-api-clients.md](external-api-clients.md)).
 5. **Expect every user to sign in again**, and tell them beforehand.
 6. **Keep the Gadget app** until record counts match and outside callers have stopped arriving in its logs.
 
-An export filtered on `updatedAt` does not see deletes. If records can be deleted during the gap, compare ids between the two databases after the final load.
+An export filtered on `updatedAt` does not see deletes. If records can be deleted during the gap, compare ids between the two databases after the final load ([data-export.md](data-export.md#catch-up-on-records-that-change-during-the-export)).
 
 ## Common pitfalls
 
