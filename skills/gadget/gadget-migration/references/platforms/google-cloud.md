@@ -32,6 +32,7 @@ It reads `gcloud` commands in shell scripts, CI workflows, and `cloudbuild.yaml`
 | `google-cloud/migrate-shared-account` | A migration job that runs as the same service account as a service, so that service's account can read the owner's URL in the migration secret | `gcloud secrets get-iam-policy migrate-database-url --project=my-app-production` should list only `my-app-migrate` |
 | `google-cloud/sql-user-create` | `gcloud sql users create`, which gives the user `CREATEROLE` and `CREATEDB` and adds it to `cloudsqlsuperuser` | |
 | `google-cloud/instance-limits` | A public service deployed without `--min` or `--max` | `gcloud run services describe my-app-web --region=us-central1 --format=yaml` shows the `minScale` and `maxScale` annotations |
+| `google-cloud/memorystore-eviction` | A `gcloud redis instances create` for a BullMQ app without `--redis-config=maxmemory-policy=noeviction`. Memorystore's default, `volatile-lru`, deletes queued jobs when memory fills | `gcloud redis instances describe my-app-queue --region=us-central1 --format="value(redisConfigs)"` |
 | Traffic pinned by a rollback | The newest revision gets no traffic | `gcloud run services describe my-app-web --region=us-central1 --format="yaml(status.traffic)"` should show `latestRevision: true` at `percent: 100` |
 
 ## Failure signatures

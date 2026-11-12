@@ -641,6 +641,29 @@ function sqlUserFindings(commands: Gcloud[], findings: Finding[]) {
   }
 }
 
+// Memorystore for Redis defaults to volatile-lru, which evicts BullMQ's keys when memory fills.
+// A later update to noeviction anywhere in the repo counts.
+function memorystoreFindings(repo: Repo, commands: Gcloud[], findings: Finding[]) {
+  if (!repo.dependencies().bullmq) return;
+  const policy = (value: string | undefined) => value?.match(/(?:^|,)maxmemory-policy=([\w-]+)/)?.[1];
+  const fixed = commands.some((c) => isCmd(c, "redis", "instances", "update") && policy(flag(c, "update-redis-config")) === "noeviction");
+  for (const c of commands.filter((c) => isCmd(c, "redis", "instances", "create"))) {
+    const set = policy(flag(c, "redis-config"));
+    if (set === "noeviction" || fixed) continue;
+    const name = c.positional[3] ? `${c.positional[3]} ` : "";
+    findings.push({
+      id: "google-cloud/memorystore-eviction",
+      severity: "error",
+      file: c.file,
+      line: c.line,
+      message: `This creates Memorystore instance ${name}${set ? `with maxmemory-policy ${set}` : "without a maxmemory-policy, so it gets Memorystore's default, volatile-lru"}. Redis then deletes queued BullMQ jobs when its memory is full, and every add still succeeds.`,
+      error: 'IMPORTANT! Eviction policy is volatile-lru. It should be "noeviction"',
+      fix: "Add --redis-config=maxmemory-policy=noeviction, or run gcloud redis instances update with --update-redis-config=maxmemory-policy=noeviction on the existing instance.",
+      docs: `${GUIDE}#replace-background-and-scheduled-actions`,
+    });
+  }
+}
+
 export const googleCloud: CheckModule = {
   platform: "google-cloud",
   title: "Google Cloud",
@@ -669,6 +692,7 @@ export const googleCloud: CheckModule = {
     ownerFindings(repo, commands, findings);
     sharedAccountFindings(commands, findings);
     sqlUserFindings(commands, findings);
+    memorystoreFindings(repo, commands, findings);
     return findings;
   },
 };

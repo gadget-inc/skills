@@ -1,5 +1,5 @@
 // Run with: node --test "tests/**/*.test.ts"
-// The Google Cloud Run checks in scripts/checks/google-cloud.ts, on the fixtures in
+// The Google Cloud checks in scripts/checks/google-cloud.ts, on the fixtures in
 // fixtures/preflight/google-cloud-*, and on the complete examples in references/platforms/google-cloud.md,
 // which must pass their own checks.
 import assert from "node:assert/strict";
@@ -30,7 +30,7 @@ function withApp(files: Record<string, string>, test: (dir: string) => void) {
 
 const shopifyServer = 'import { shopifyApp } from "@shopify/shopify-app-react-router/server";\nexport default shopifyApp({ apiKey: process.env.SHOPIFY_API_KEY, apiSecretKey: process.env.SHOPIFY_API_SECRET || "", appUrl: process.env.SHOPIFY_APP_URL || "" });\n';
 
-describe("Google Cloud Run checks", () => {
+describe("Google Cloud checks", () => {
   it("finds each pitfall in the bad fixture, at its line", () => {
     const { findings } = preflight(fixture("google-cloud-bad"), ["google-cloud"]);
     assert.deepEqual(where(own(findings)), [
@@ -220,5 +220,48 @@ describe("google-cloud/migrate-shared-account", () => {
     const script = platformBlocks("google-cloud.md").find((b) => b.path === "scripts/deploy.sh")!.code;
     assert.match(script, /--service-account="my-app-migrate@/);
     withApp({ "scripts/deploy.sh": script }, (dir) => assert.deepEqual(shared(dir), []));
+  });
+});
+
+describe("google-cloud/memorystore-eviction", () => {
+  const pkg = (deps: Record<string, string>) => JSON.stringify({ name: "my-app", dependencies: deps });
+  const app = (lines: string[], deps: Record<string, string> = { bullmq: "^5.58.0", "@google-cloud/tasks": "^6.2.0" }) => ({
+    "package.json": pkg(deps),
+    "scripts/gcp-infra.sh": ["set -euo pipefail", ...lines].join("\n") + "\n",
+  });
+  const eviction = (dir: string) => preflight(dir, ["google-cloud"]).findings.filter((f) => f.id === "google-cloud/memorystore-eviction");
+
+  it("fails an instance created with Memorystore's default policy", () => {
+    withApp(app(["gcloud redis instances create my-app-queue --region=us-central1 --size=1"]), (dir) => {
+      const found = eviction(dir);
+      assert.deepEqual(where(found), ["google-cloud/memorystore-eviction scripts/gcp-infra.sh:2"]);
+      assert.equal(found[0].severity, "error");
+      assert.match(found[0].message, /^This creates Memorystore instance my-app-queue without a maxmemory-policy, so it gets Memorystore's default, volatile-lru\./);
+    });
+  });
+
+  it("names a policy that still evicts", () => {
+    withApp(app(["gcloud redis instances create my-app-queue --region=us-central1 --size=1 --redis-config=maxmemory-policy=allkeys-lru"]), (dir) =>
+      assert.match(eviction(dir)[0].message, /with maxmemory-policy allkeys-lru\./)
+    );
+  });
+
+  it("says nothing for noeviction, set at creation among other settings or by a later update", () => {
+    withApp(app(["gcloud redis instances create my-app-queue --region=us-central1 --size=1 --redis-config=notify-keyspace-events=Ex,maxmemory-policy=noeviction"]), (dir) =>
+      assert.deepEqual(eviction(dir), [])
+    );
+    withApp(
+      app([
+        "gcloud redis instances create my-app-queue --region=us-central1 --size=1",
+        "gcloud redis instances update my-app-queue --region=us-central1 --update-redis-config=maxmemory-policy=noeviction",
+      ]),
+      (dir) => assert.deepEqual(eviction(dir), [])
+    );
+  });
+
+  it("says nothing when the app doesn't use BullMQ", () => {
+    withApp(app(["gcloud redis instances create my-app-cache --region=us-central1 --size=1"], { "@google-cloud/tasks": "^6.2.0" }), (dir) =>
+      assert.deepEqual(eviction(dir), [])
+    );
   });
 });
