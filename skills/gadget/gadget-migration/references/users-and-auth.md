@@ -170,7 +170,7 @@ A user who signed in with Google has a `googleProfileId`, which is Google's acco
 
 | Provider | How the imported user is matched |
 |---|---|
-| Supabase Auth | By verified email. Import with `email_confirm: true` |
+| Supabase Auth | By verified email. Import with `email_confirm: user.emailVerified` |
 | Clerk | By verified email. Create Google-only users with `skipPasswordRequirement: true` |
 | Firebase Auth | By provider data. Add `providerData: [{ providerId: "google.com", uid: user.googleProfileId, email: user.email }]` to the imported user |
 | Better Auth | By the `google` account row that `betterAuthRows` writes |
