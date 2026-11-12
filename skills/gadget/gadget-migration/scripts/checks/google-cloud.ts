@@ -806,6 +806,25 @@ function workerPoolFindings(commands: Gcloud[], findings: Finding[]) {
   }
 }
 
+// enqueueForShop gives up after 3 tries, and a queue reactivating after 30 idle days can take minutes.
+// From a task route the 500 makes Cloud Tasks retry the task; from a webhook or page route the job is lost.
+function enqueueForShopFindings(repo: Repo, findings: Finding[]) {
+  for (const file of repo.find(/^app\/routes\/[^/]*\.(ts|tsx|js|jsx)$/).filter((f) => !/^app\/routes\/(tasks|schedules|pubsub)[.\/]/.test(f))) {
+    const text = repo.read(file) ?? "";
+    const m = /\benqueueForShop\s*\(/.exec(mask(text));
+    if (!m) continue;
+    findings.push({
+      id: "google-cloud/enqueue-for-shop-in-request",
+      severity: "warning",
+      file,
+      line: lineAt(text, m.index),
+      message: "This route calls enqueueForShop outside a task route. When a store's queue is still being created or reactivating after 3 tries, the job is lost, because no Cloud Tasks retry covers a webhook or page request.",
+      fix: "Have the route create one task on the shared webhooks queue, and call enqueueForShop from that task's route, where a 500 makes Cloud Tasks retry the whole task.",
+      docs: `${GUIDE}#limit-concurrency-per-store`,
+    });
+  }
+}
+
 export const googleCloud: CheckModule = {
   platform: "google-cloud",
   title: "Google Cloud",
@@ -840,6 +859,7 @@ export const googleCloud: CheckModule = {
     scheduleNameFindings(repo, findings);
     taskNameFindings(repo, findings);
     workerPoolFindings(commands, findings);
+    enqueueForShopFindings(repo, findings);
     return findings;
   },
 };

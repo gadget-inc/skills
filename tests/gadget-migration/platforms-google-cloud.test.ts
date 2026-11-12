@@ -372,3 +372,21 @@ describe("google-cloud/worker-pool-instances", () => {
     withApp(app(" --instances=3"), (dir) => assert.deepEqual(pools(dir), []));
   });
 });
+
+describe("google-cloud/enqueue-for-shop-in-request", () => {
+  const pkg = JSON.stringify({ name: "my-app", dependencies: { "@google-cloud/tasks": "^6.2.0" } });
+  const call = 'import { enqueueForShop } from "../tasks.server";\nexport const action = async () => {\n  await enqueueForShop("1", "tasks/notify-external-system", {}, { key: "notify-1" });\n  return new Response();\n};\n';
+  const found = (path: string) => {
+    let out: string[] = [];
+    withApp({ "package.json": pkg, [path]: call }, (dir) => (out = where(preflight(dir, ["google-cloud"]).findings.filter((f) => f.id === "google-cloud/enqueue-for-shop-in-request"))));
+    return out;
+  };
+
+  it("warns about enqueueForShop in a webhook route", () => {
+    assert.deepEqual(found("app/routes/webhooks.orders.create.tsx"), ["google-cloud/enqueue-for-shop-in-request app/routes/webhooks.orders.create.tsx:3"]);
+  });
+
+  it("says nothing in a task route", () => {
+    assert.deepEqual(found("app/routes/tasks.order-created.tsx"), []);
+  });
+});
