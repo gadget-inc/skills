@@ -129,6 +129,7 @@ Handle the delete topics too, such as `orders/delete` and `products/delete`. The
 Gadget actions often checked `record.changed("financialStatus")` before doing work. Lock the row, read the old value, write, and compare, all in one transaction:
 
 ```typescript
+// in app/jobs/handleOrderUpdated.server.ts
 const before = await client.query("select financial_status from shopify_order where id = $1 for update", [orderId]);
 const written = await client.query(upsertOrderFromWebhook, values);
 const changed = written.rowCount === 1 && before.rows[0]?.financial_status !== payload.financial_status;
