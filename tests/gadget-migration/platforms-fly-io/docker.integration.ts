@@ -42,7 +42,7 @@ describe("fly-io.md's Dockerfile and crontab", { skip }, () => {
     // the guide's enqueue script, shortened
     writeFileSync(
       join(app, "scripts/enqueue-prune-audit-logs.ts"),
-      'import { Queue } from "bullmq";\nimport IORedis from "ioredis";\nconst connection = new IORedis(process.env.REDIS_URL!, { family: 6 });\nconst queue = new Queue("scheduled", { connection });\nawait queue.add("pruneAuditLogs", {}, { jobId: `pruneAuditLogs-${new Date().toISOString().slice(0, 10)}` });\nawait queue.close();\nconnection.disconnect();\n'
+      'import { Queue } from "bullmq";\nimport IORedis from "ioredis";\nconst connection = new IORedis(process.env.REDIS_URL!, { family: 6 });\nconst queue = new Queue("scheduled", { connection });\nconst now = new Date();\nconst scheduled = new Date(now);\nscheduled.setUTCHours(2, 0, 0, 0);\nif (scheduled > now) scheduled.setUTCDate(scheduled.getUTCDate() - 1);\nconst day = scheduled.toISOString().slice(0, 10);\nawait queue.add("pruneAuditLogs", { day }, { jobId: `pruneAuditLogs-${day}` });\nawait queue.close();\nconnection.disconnect();\n'
     );
     writeFileSync(join(app, "prisma/schema.prisma"), 'generator client {\n  provider = "prisma-client-js"\n}\n\ndatasource db {\n  provider = "postgresql"\n  url      = env("DATABASE_URL")\n}\n\nmodel Session {\n  id String @id\n}\n');
     writeFileSync(join(app, ".dockerignore"), "node_modules\n");

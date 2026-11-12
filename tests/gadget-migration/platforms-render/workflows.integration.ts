@@ -101,4 +101,25 @@ describe("starting 12 stores' runs against a start limit", { skip: skipWithoutDo
       redis.disconnect();
     }
   });
+
+  it("names each run's jobs by the most recent 02:00 UTC at or before now, not the clock's date", async () => {
+    const module = await import(join(dir, "app/jobs/reconcile-all-shops.server.ts"));
+    const { connection } = await import(join(dir, "app/queues.server.ts"));
+    try {
+      const cases: [string, string][] = [
+        ["2026-11-10T02:00:00.000Z", "2026-11-10"], // on time
+        ["2026-11-10T02:00:30.000Z", "2026-11-10"], // a few seconds late
+        ["2026-11-10T23:59:59.999Z", "2026-11-10"], // a long retry, before midnight
+        ["2026-11-11T00:05:00.000Z", "2026-11-10"], // after midnight: the clock's date would take the 11th's id
+        ["2026-11-11T01:59:59.999Z", "2026-11-10"], // a minute before the next run is due
+        ["2026-11-11T02:00:00.000Z", "2026-11-11"], // the next run
+        ["2026-12-01T01:00:00.000Z", "2026-11-30"], // across a month
+        ["2027-01-01T00:30:00.000Z", "2026-12-31"], // across a year
+      ];
+      for (const [now, day] of cases) assert.equal(module.scheduledDay(new Date(now)), day, now);
+    } finally {
+      await module.workflowStarts.close();
+      connection.disconnect();
+    }
+  });
 });

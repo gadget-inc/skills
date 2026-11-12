@@ -205,8 +205,17 @@ const TASK_SLUG = "my-app-workflows/reconcileShop";
 
 export const workflowStarts = new Queue("workflow-starts", { connection });
 
-// one job per store and day, so a second cron run on the same day adds nothing
-export async function queueReconciliations(shopIds: string[], day = new Date().toISOString().slice(0, 10)) {
+// the date of the most recent 02:00 UTC (the cron's schedule) at or before now, because Render's
+// cron doesn't pass the scheduled time; a run that starts late keeps the date of the run it belongs to
+export function scheduledDay(now = new Date()) {
+  const scheduled = new Date(now);
+  scheduled.setUTCHours(2, 0, 0, 0);
+  if (scheduled > now) scheduled.setUTCDate(scheduled.getUTCDate() - 1);
+  return scheduled.toISOString().slice(0, 10);
+}
+
+// one job per store and scheduled run, so a second cron run for the same 02:00 adds nothing
+export async function queueReconciliations(shopIds: string[], day = scheduledDay()) {
   await workflowStarts.addBulk(
     shopIds.map((shopId) => ({
       name: "reconcileShop",
@@ -240,6 +249,8 @@ export function startWorkflowStartsWorker() {
   return worker;
 }
 ```
+
+Build the day from the run's scheduled time, not the clock. With `new Date()`, a run that starts or retries after midnight takes the next day's job ids and idempotency keys, so that store runs twice, and the next night's real run finds its ids taken and starts nothing. Change the hour in `scheduledDay` with the cron's `schedule`, and pass the day on from the cron script to anything else that builds an id from it, as the guide's [Replace scheduled actions](https://docs.gadget.dev/guides/moving-to-another-platform/render#replace-scheduled-actions) does for `startShopReconciliation`.
 
 A concurrency limit needs the same treatment. Each worker's `concurrency` option counts only its own jobs, so a deploy doubles it for a minute, and the old instance keeps finishing jobs for up to `maxShutdownDelaySeconds`. Set the limit on the queue once, such as `await externalQueue.setGlobalConcurrency(10)` when the worker starts: BullMQ stores it in `bull:external:meta`, and every instance shares it.
 
