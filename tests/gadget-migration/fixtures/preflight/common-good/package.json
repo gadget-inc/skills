@@ -1,0 +1,10 @@
+{
+  "name": "common-good",
+  "type": "module",
+  "scripts": {
+    "build": "react-router build && npm run build:worker",
+    "build:worker": "esbuild app/worker.server.ts --bundle --platform=node --format=esm --packages=external --outfile=build/worker.js",
+    "start": "react-router-serve ./build/server/index.js"
+  },
+  "dependencies": { "@prisma/client": "6.19.3", "prisma": "6.19.3", "bullmq": "6.7.3", "ioredis": "6.0.0", "esbuild": "0.28.2" }
+}

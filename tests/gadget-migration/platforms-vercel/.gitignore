@@ -1,0 +1,4 @@
+node_modules
+.typecheck
+.work
+prisma

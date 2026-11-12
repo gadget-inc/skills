@@ -1,0 +1,20 @@
+{
+  "name": "gadget-migration-platforms-aws-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "pretest": "prisma generate --schema prisma/schema.prisma",
+    "test": "node --test --test-concurrency=1 --test-timeout=300000 \"*.integration.ts\""
+  },
+  "dependencies": {
+    "@aws-sdk/client-ecs": "3.1167.0",
+    "@aws-sdk/client-scheduler": "3.1167.0",
+    "@aws-sdk/client-sqs": "3.1167.0",
+    "@prisma/client": "6.19.3",
+    "@types/node": "25.5.2",
+    "@types/pg": "8.15.6",
+    "pg": "8.23.1",
+    "prisma": "6.19.3",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "my-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "react-router build",
+    "start": "react-router-serve ./build/server/index.js",
+    "docker-start": "npm run setup && npm run start",
+    "setup": "prisma generate && prisma migrate deploy",
+    "worker": "node build/worker.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1167.0",
+    "@aws-sdk/client-sqs": "3.1167.0",
+    "@aws-sdk/s3-request-presigner": "3.1167.0",
+    "@prisma/client": "6.19.3",
+    "prisma": "6.19.3"
+  }
+}

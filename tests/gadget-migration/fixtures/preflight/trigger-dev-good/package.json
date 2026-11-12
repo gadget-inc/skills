@@ -1,0 +1,16 @@
+{
+  "name": "my-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy:trigger": "npx trigger.dev@4.8.3 deploy",
+    "dev:trigger": "npx trigger.dev@latest dev"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "@trigger.dev/sdk": "4.8.3"
+  },
+  "devDependencies": {
+    "@trigger.dev/build": "4.8.3"
+  }
+}

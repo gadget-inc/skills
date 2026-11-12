@@ -10,7 +10,8 @@ export function blocks(reference: string, path: string): string[] {
   const found: string[] = [];
   for (const match of markdown.matchAll(/```(\w+)\n([\s\S]*?)```/g)) {
     const [firstLine] = match[2].split("\n");
-    if (firstLine === `-- in ${path}` || firstLine === `// in ${path}`) found.push(match[2]);
+    // "# in" covers YAML, TOML, Dockerfile, and shell blocks
+    if (firstLine === `-- in ${path}` || firstLine === `// in ${path}` || firstLine === `# in ${path}`) found.push(match[2]);
   }
   if (found.length === 0) throw new Error(`no code block for ${path} in ${reference}`);
   return found;

@@ -1,0 +1,16 @@
+client_id = "production-client-id"
+name = "my-app"
+application_url = "https://app.example.com"
+embedded = true
+
+[auth]
+redirect_urls = [
+  "https://app.example.com/auth/callback"
+]
+
+[webhooks]
+api_version = "2026-04"
+
+  [[webhooks.subscriptions]]
+  topics = ["orders/create"]
+  uri = "https://app.example.com/webhooks/orders/create"

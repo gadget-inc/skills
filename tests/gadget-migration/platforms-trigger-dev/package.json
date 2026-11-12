@@ -1,0 +1,15 @@
+{
+  "name": "gadget-migration-platforms-trigger-dev-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"*.integration.ts\""
+  },
+  "dependencies": {
+    "@trigger.dev/build": "4.8.3",
+    "@trigger.dev/sdk": "4.8.3",
+    "@types/node": "25.5.2",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3"
+  }
+}

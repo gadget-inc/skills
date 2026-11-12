@@ -1,0 +1,67 @@
+# Every pitfall the Render checks look for. render-good/render.yaml is the same app done right.
+services:
+  - type: web
+    name: my-app-web
+    runtime: docker
+    region: oregon
+    plan: free
+    dockerCommand: npm run start
+    disk:
+      name: uploads
+      mountPath: /data
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: my-app-db
+          property: connectionString
+      - key: DIRECT_DATABASE_URL
+        fromDatabase:
+          name: my-app-db
+          property: connectionPoolString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: my-app-queue
+          property: connectionString
+      - fromGroup: my-app-config
+  - type: worker
+    name: my-app-worker
+    runtime: docker
+    region: oregon
+    maxShutdownDelaySeconds: 600
+  - type: worker
+    name: my-app-mailer
+    runtime: docker
+    region: oregon
+    dockerCommand: pnpm run worker
+  - type: pserv
+    name: my-app-admin
+    runtime: docker
+    region: oregon
+    dockerCommand: npm run docker-start
+  - type: cron
+    name: my-app-prune-audit-logs
+    runtime: docker
+    region: oregon
+    schedule: "0 2 * * *"
+    dockerCommand: node build/enqueue-prune-audit-logs.js
+  - type: keyvalue
+    name: my-app-queue
+    region: ohio
+    plan: free
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: everywhere
+databases:
+  - name: my-app-db
+    region: oregon
+    plan: free
+envVarGroups:
+  - name: my-app-config
+    envVars:
+      - key: SHOPIFY_API_SECRET
+        sync: false
+      - key: REPORTING_DATABASE_URL
+        fromDatabase:
+          name: my-app-db
+          property: connectionString

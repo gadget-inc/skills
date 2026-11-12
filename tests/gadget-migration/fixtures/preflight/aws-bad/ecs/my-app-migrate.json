@@ -1,0 +1,38 @@
+{
+  "family": "my-app-migrate",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::123456789012:role/my-app-execution",
+  "taskRoleArn": "arn:aws:iam::123456789012:role/my-app-task",
+  "containerDefinitions": [
+    {
+      "name": "app",
+      "image": "IMAGE",
+      "command": [
+        "npx",
+        "prisma",
+        "migrate",
+        "deploy"
+      ],
+      "environment": [],
+      "secrets": [
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:123456789012:secret:my-app/database-url-AbCdEf"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/my-app",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "migrate"
+        }
+      }
+    }
+  ]
+}

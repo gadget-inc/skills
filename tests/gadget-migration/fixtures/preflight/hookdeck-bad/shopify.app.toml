@@ -1,0 +1,14 @@
+client_id = "abc123"
+name = "my-app"
+application_url = "https://app.example.com"
+
+[webhooks]
+api_version = "2026-04"
+
+  [[webhooks.subscriptions]]
+  topics = ["orders/updated"]
+  uri = "https://hkdk.events/<source-id>/webhooks/orders/updated"
+
+  [[webhooks.subscriptions]]
+  topics = ["app/uninstalled"]
+  uri = "https://hkdk.events/src_abc123"

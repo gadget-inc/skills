@@ -1,0 +1,3 @@
+CRON_TZ=America/New_York
+# pruneAuditLogs at 02:00 New York time
+0 2 * * * node /app/build/enqueue-prune-audit-logs.js

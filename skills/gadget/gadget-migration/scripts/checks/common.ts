@@ -1,0 +1,461 @@
+// Checks that apply on every host. references/platforms/common.md explains each one.
+import { DOCS, type CheckModule, type Finding, type Repo } from "./types.ts";
+import { dockerCommand, lineAt, lineOf, parseDockerfile } from "./read-config.ts";
+import { calls, closing, mask, nextToken, skipString, skipTemplate } from "./source-scan.ts";
+
+const REF = "references/platforms/common.md";
+
+// variables that hold an origin without a trailing slash on the new host
+const NO_SLASH_VARS = ["SHOPIFY_APP_URL", "APP_URL", "RENDER_EXTERNAL_URL"];
+// variables that hold a bare host name, with no https://
+const HOST_ONLY_VARS = ["VERCEL_URL", "VERCEL_PROJECT_PRODUCTION_URL", "VERCEL_BRANCH_URL", "RAILWAY_PUBLIC_DOMAIN", "RAILWAY_PRIVATE_DOMAIN"];
+// what Gadget sets for an app's backend and frontend, from the docs guide's environment variables section.
+// Other GADGET_PUBLIC_ names are the app's own variables, which Gadget hands to the frontend.
+const GADGET_SET_VARS = ["GADGET_APP", "GADGET_APP_URL", "GADGET_ENV", "GADGET_PUBLIC_APP_SLUG", "GADGET_PUBLIC_APP_ENV", "GADGET_PUBLIC_SHOPIFY_APP_URL"];
+
+// Where each argument of a call that takes a URL starts: both of new URL(input, base), and fetch's first.
+function urlArgumentStarts(text: string): Map<number, string> {
+  const starts = new Map<number, string>();
+  for (const [callee, name, count] of [["\\bnew\\s+URL", "new URL", 2], ["(?<![\\w$.])fetch", "fetch", 1]] as const) {
+    for (const call of calls(text, callee)) {
+      let arg = nextToken(text, call.open + 1);
+      for (let n = 0; n < count && arg < call.close; n++) {
+        starts.set(arg, name);
+        // the next top-level comma ends this argument
+        let i = arg;
+        while (i < call.close && text[i] !== ",") {
+          const c = text[i];
+          if (c === "(" || c === "[" || c === "{") i = closing(text, i);
+          else if (c === '"' || c === "'") i = skipString(text, i);
+          else if (c === "`") i = skipTemplate(text, i);
+          if (i < 0) return starts;
+          i++;
+        }
+        arg = nextToken(text, i + 1);
+      }
+    }
+  }
+  return starts;
+}
+
+export function appUrlFindings(repo: Repo): Finding[] {
+  const findings: Finding[] = [];
+  for (const file of repo.sourceFiles()) {
+    const text = repo.read(file);
+    if (!text || !text.includes("process.env")) continue;
+    // comments and string contents blanked, so only code matches
+    const code = mask(text);
+
+    // `${process.env.X}path` or process.env.X + "path", where the path doesn't start with a slash. A query
+    // string or fragment, as in `${process.env.SHOPIFY_APP_URL}?shop=${shop}`, is a valid URL on an origin.
+    const vars = ["GADGET_APP_URL", ...NO_SLASH_VARS].join("|");
+    const pathStart = "([A-Za-z0-9_-]|\\.(?=\\w))";
+    const concat = new RegExp(`\\$\\{\\s*process\\.env\\.(${vars})\\s*\\}${pathStart}|process\\.env\\.(${vars})\\s*\\+\\s*["'\`]${pathStart}`, "g");
+    for (const match of text.matchAll(concat)) {
+      if (!/\S/.test(code.slice(match.index!, match.index! + 3))) continue;
+      const name = match[1] ?? match[3];
+      const isGadget = name === "GADGET_APP_URL";
+      findings.push({
+        id: "common/app-url-slash",
+        severity: "error",
+        file,
+        line: lineAt(text, match.index!),
+        message: isGadget
+          ? "Code adds a path straight onto GADGET_APP_URL, which only works because Gadget's value ends with a slash. The value you set on the new host, such as your custom domain, usually has none."
+          : `Code adds a path straight onto ${name}, which has no trailing slash.`,
+        error: "https://app.example.comapi/callback",
+        fix: 'Build the URL with new URL("api/callback", process.env.SHOPIFY_APP_URL), which works with or without the slash.',
+        docs: `${DOCS}#environment-variables`,
+      });
+    }
+
+    // a bare host name used as a URL: passed to new URL() or fetch(), or followed by a path. Only a value that
+    // starts the expression counts: `redis://u:${pw}@${process.env.RAILWAY_PRIVATE_DOMAIN}:6379` has its
+    // scheme, and `Listening on ${process.env.RAILWAY_PUBLIC_DOMAIN}` is a log line.
+    const urlArgs = urlArgumentStarts(text);
+    for (const match of code.matchAll(new RegExp(`process\\.env\\.(${HOST_ONLY_VARS.join("|")})\\b`, "g"))) {
+      const name = match[1];
+      const at = match.index!;
+      // a condition, as in process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000"
+      if (/^\s*(\?(?![?.])|&&|[!=]==?)/.test(text.slice(at + match[0].length))) continue;
+      // inside `${...}`: the value counts only when it opens the template literal
+      const dollar = text.slice(0, at).search(/\$\{\s*$/);
+      let start = at;
+      let after: number;
+      if (dollar >= 0) {
+        if (text[dollar - 1] !== "`") continue;
+        start = dollar - 1;
+        after = closing(text, dollar + 1) + 1;
+        if (after <= 0) continue;
+      } else {
+        after = at + match[0].length;
+      }
+      const used = urlArgs.get(start);
+      const pathFollows = dollar >= 0 ? text[after] === "/" : /^\s*\+\s*["'`]\//.test(text.slice(after)) && /(^|[=(,:?]|=>|return)\s*$/.test(text.slice(Math.max(0, start - 20), start));
+      if (!used && !pathFollows) continue;
+      findings.push({
+        id: "common/host-without-scheme",
+        severity: "error",
+        file,
+        line: lineAt(text, at),
+        message: used
+          ? `${name} holds a host name without https://, and this passes it to ${used}() as a URL.`
+          : `${name} holds a host name without https://, and this adds a path to it, which makes a URL with no scheme.`,
+        error: used === "fetch" ? "TypeError: Failed to parse URL" : "TypeError: Invalid URL",
+        fix: `Prefix it, as in \`https://\${process.env.${name}}\`, or use your own SHOPIFY_APP_URL.`,
+        docs: `${DOCS}#environment-variables`,
+      });
+    }
+
+    for (const match of code.matchAll(/process\.env\.(GADGET_[A-Z0-9_]+)/g)) {
+      const name = match[1];
+      const setByGadget = GADGET_SET_VARS.includes(name);
+      if (!setByGadget && !name.startsWith("GADGET_PUBLIC_")) continue;
+      if (findings.some((f) => f.file === file && f.line === lineAt(text, match.index!))) continue;
+      findings.push({
+        id: "common/gadget-variable",
+        severity: "warning",
+        file,
+        line: lineAt(text, match.index!),
+        message: setByGadget
+          ? `${name} was set by Gadget. Nothing sets it on the new host unless you do.`
+          : `${name} reached the frontend because Gadget passes on every GADGET_PUBLIC_ variable. The new host's bundler only passes on its own prefix, such as VITE_, so the frontend gets undefined.`,
+        fix: setByGadget
+          ? "Replace it with a variable you set per environment, such as SHOPIFY_APP_URL for GADGET_APP_URL and APP_ENV for GADGET_ENV. Keep the trailing slash in mind for URLs."
+          : `Rename it with your bundler's public prefix, such as VITE_${name.slice("GADGET_PUBLIC_".length)} read through import.meta.env, or return the value from a loader.`,
+        docs: `${DOCS}#environment-variables`,
+      });
+    }
+  }
+  return findings;
+}
+
+export function prismaFindings(repo: Repo): Finding[] {
+  const findings: Finding[] = [];
+  const schemaPath = repo.find(/(^|\/)schema\.prisma$/).find((p) => !p.includes("node_modules")) ?? null;
+  if (!schemaPath) return findings;
+  const schema = repo.read(schemaPath) ?? "";
+  const provider = schema.match(/datasource\s+\w+\s*\{[^}]*provider\s*=\s*"([^"]+)"/)?.[1];
+  const dir = schemaPath.replace(/schema\.prisma$/, "");
+
+  if (provider === "sqlite") {
+    findings.push({
+      id: "common/prisma-sqlite",
+      severity: "warning",
+      file: schemaPath,
+      line: lineOf(schema, /provider\s*=\s*"sqlite"/),
+      message: "The Prisma datasource is still SQLite, as in Shopify's app template.",
+      fix: 'Set provider = "postgresql" and url = env("DATABASE_URL"), then replace the template\'s migration (see common/sqlite-migration).',
+      docs: `${DOCS}#install-and-authenticate-merchants`,
+    });
+  }
+  if (provider !== "postgresql") return findings;
+
+  const lock = repo.read(`${dir}migrations/migration_lock.toml`);
+  if (lock && /provider\s*=\s*"sqlite"/.test(lock)) {
+    findings.push({
+      id: "common/sqlite-migration-lock",
+      severity: "error",
+      file: `${dir}migrations/migration_lock.toml`,
+      line: lineOf(lock, "sqlite"),
+      message: "migration_lock.toml still says sqlite while the schema says postgresql.",
+      error: "Error: P3019",
+      fix: "Delete prisma/migrations, then run prisma migrate dev --name init against a local Postgres database and commit the new folder.",
+      docs: `${DOCS}#install-and-authenticate-merchants`,
+    });
+  }
+  for (const file of repo.find(new RegExp(`^${dir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}migrations/[^/]+/migration\\.sql$`))) {
+    const sql = repo.read(file) ?? "";
+    const match = sql.match(/\bDATETIME\b|\bAUTOINCREMENT\b|PRAGMA /);
+    if (!match) continue;
+    findings.push({
+      id: "common/sqlite-migration",
+      severity: "error",
+      file,
+      line: lineOf(sql, match[0]),
+      message: "This migration is written for SQLite, like the one in Shopify's app template, and fails on Postgres.",
+      error: 'type "datetime" does not exist',
+      fix: "Delete prisma/migrations, then run prisma migrate dev --name init against a local Postgres database and commit the new folder before the first deploy.",
+      docs: `${DOCS}#install-and-authenticate-merchants`,
+    });
+  }
+  return findings;
+}
+
+// A Dockerfile path from a platform's config, relative to the repository root.
+export function dockerfilePath(path: unknown, dir = ""): string {
+  const clean = (typeof path === "string" && path.trim() ? path.trim() : "Dockerfile").replace(/^\.\//, "");
+  return dir ? `${dir.replace(/\/+$/, "")}/${clean}` : clean;
+}
+
+// Whether the Dockerfile generates the Prisma client after the schema is copied in.
+export function dockerfileGeneratesPrisma(repo: Repo, dockerfile = "Dockerfile"): boolean {
+  const text = repo.read(dockerfile);
+  if (!text) return false;
+  const steps = parseDockerfile(text);
+  const schema = repo.find(/(^|\/)schema\.prisma$/)[0] ?? "prisma/schema.prisma";
+  // a COPY or ADD that brings in the schema: the whole build context, or a path such as prisma or prisma/schema.prisma
+  const bringsSchema = (args: string) => {
+    let words: string[];
+    try {
+      words = args.startsWith("[") ? JSON.parse(args) : args.split(/\s+/);
+    } catch {
+      words = args.split(/\s+/);
+    }
+    const sources = words.filter((w) => !w.startsWith("--")).slice(0, -1);
+    return sources.some((source) => {
+      const path = source.replace(/^\.\//, "").replace(/\/+$/, "");
+      return path === "" || path === "." || path === "*" || /prisma/.test(path) || schema.startsWith(`${path}/`);
+    });
+  };
+  const copy = steps.findIndex((s) => (s.instruction === "COPY" || s.instruction === "ADD") && bringsSchema(s.args));
+  return steps.some((step, index) => index > copy && step.instruction === "RUN" && /prisma\s+generate/.test(expandScripts(repo, step.args)));
+}
+
+// The command the Dockerfile starts, from its last CMD, and the line it's on.
+export function dockerfileCmd(repo: Repo, dockerfile = "Dockerfile"): { command: string; line: number } | null {
+  const text = repo.read(dockerfile);
+  if (!text) return null;
+  const cmd = parseDockerfile(text).filter((s) => s.instruction === "CMD").pop();
+  return cmd ? { command: dockerCommand(cmd.args), line: cmd.line } : null;
+}
+
+// Findings for a platform that starts the image with its own command instead of the Dockerfile's CMD.
+// `dockerfile` is the file the platform builds, from its config.
+export function startOverrideFindings(repo: Repo, platform: string, file: string, line: number | undefined, command: string, docs: string, dockerfile = "Dockerfile"): Finding[] {
+  const deps = repo.dependencies();
+  if (!deps["@prisma/client"] && !deps.prisma) return [];
+  if (!repo.exists(dockerfile)) return [];
+  if (/prisma\s+generate/.test(expandScripts(repo, command))) return [];
+  if (dockerfileGeneratesPrisma(repo, dockerfile)) return [];
+  return [
+    {
+      id: `${platform}/prisma-generate`,
+      severity: "error",
+      file,
+      line,
+      message: `This starts the image with "${command}" instead of the template's docker-start script, and nothing in ${dockerfile} runs prisma generate after the schema is copied in.`,
+      error: "@prisma/client did not initialize yet",
+      fix: `Add RUN npx prisma generate to ${dockerfile} after COPY . . (or after the COPY that brings in the prisma folder).`,
+      docs,
+    },
+  ];
+}
+
+// Scripts each package manager runs without "run": npm's shortcuts, and any script for pnpm and yarn
+// unless the name is one of their own commands.
+const NPM_SHORTCUTS = new Set(["start", "test", "stop", "restart"]);
+const PNPM_COMMANDS = new Set(["add", "audit", "bin", "ci", "config", "create", "deploy", "dlx", "env", "exec", "fetch", "i", "import", "init", "install", "link", "list", "ls", "outdated", "pack", "patch", "prune", "publish", "rebuild", "remove", "rm", "root", "run", "setup", "store", "un", "uninstall", "unlink", "up", "update", "why"]);
+const YARN_COMMANDS = new Set(["add", "bin", "cache", "config", "constraints", "dedupe", "dlx", "exec", "explain", "info", "init", "install", "link", "node", "npm", "pack", "patch", "plugin", "rebuild", "remove", "run", "set", "unlink", "unplug", "up", "upgrade", "version", "why", "workspace", "workspaces"]);
+
+// A command with each "npm run x", "pnpm x", or "yarn x" replaced by the x script from package.json, a few levels deep.
+export function expandScripts(repo: Repo, command: string): string {
+  const scripts = repo.scripts();
+  let out = command;
+  for (let depth = 0; depth < 5; depth++) {
+    const next = out.replace(/\b(npm|pnpm|yarn)\s+(run(?:-script)?\s+)?([\w:.-]+)/g, (whole, tool: string, run: string | undefined, name: string) => {
+      if (!Object.hasOwn(scripts, name)) return whole;
+      if (!run && (tool === "npm" ? !NPM_SHORTCUTS.has(name) : (tool === "pnpm" ? PNPM_COMMANDS : YARN_COMMANDS).has(name))) return whole;
+      return `(${scripts[name]})`;
+    });
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
+function dockerfileFindings(repo: Repo): Finding[] {
+  const cmd = dockerfileCmd(repo);
+  if (!cmd) return [];
+  const runs = expandScripts(repo, cmd.command);
+  if (!/migrate deploy|db push/.test(runs)) return [];
+  return [
+    {
+      id: "common/migrate-on-start",
+      severity: "warning",
+      file: "Dockerfile",
+      line: cmd.line,
+      message: `The image starts with "${cmd.command}", which runs "${runs}". Every instance runs your migrations when it starts, and a webhook that wakes a new instance waits for them.`,
+      fix: "Run migrations once per deploy in your host's release or pre-deploy step, start the server with npm run start, and add RUN npx prisma generate after COPY . . in the Dockerfile.",
+      docs: `${DOCS}#set-up-development-and-deploys`,
+    },
+  ];
+}
+
+// Source files that import `file`, by a relative path or the template's ~/ alias for app/.
+export function importersOf(repo: Repo, file: string): string[] {
+  const bare = (path: string) => path.replace(/\.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$/, "").replace(/\/index$/, "");
+  const target = bare(file);
+  return repo.sourceFiles().filter((from) => {
+    if (from === file) return false;
+    const text = repo.read(from) ?? "";
+    for (const match of text.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s+)["']([^"']+)["']/gm)) {
+      const specifier = match[1];
+      let parts: string[];
+      if (specifier.startsWith("~/")) parts = ["app", ...specifier.slice(2).split("/")];
+      else if (specifier.startsWith(".")) {
+        parts = from.split("/").slice(0, -1);
+        for (const part of specifier.split("/")) {
+          if (part === "..") parts.pop();
+          else if (part !== ".") parts.push(part);
+        }
+      } else continue;
+      if (bare(parts.join("/")) === target) return true;
+    }
+    return false;
+  });
+}
+
+const HANDLES_SIGTERM = /["'`]SIGTERM["'`]/;
+
+function workerFindings(repo: Repo): Finding[] {
+  const findings: Finding[] = [];
+  const deps = repo.dependencies();
+  for (const file of repo.sourceFiles()) {
+    const text = repo.read(file);
+    if (!text || !/new Worker\s*\(/.test(text) || !/from\s+["']bullmq["']/.test(text)) continue;
+    // a "SIGTERM" anywhere counts, such as for (const s of ["SIGTERM", "SIGINT"]) process.on(s, ...), and so
+    // does one in a file that imports this one and closes the worker it gets
+    if (HANDLES_SIGTERM.test(text)) continue;
+    const importers = importersOf(repo, file);
+    if (importers.some((f) => HANDLES_SIGTERM.test(repo.read(f) ?? ""))) continue;
+    // a worker made inside a function, or exported, is closed by whatever calls or imports it. With no
+    // importer the script can find, such as one behind a path alias, it says nothing.
+    const code = mask(text);
+    const workers = [...code.matchAll(/new Worker\s*\(/g)].map((m) => {
+      const lineStart = code.lastIndexOf("\n", m.index!) + 1;
+      const depth = [...code.slice(0, m.index!)].reduce((d, c) => (c === "{" ? d + 1 : c === "}" ? Math.max(0, d - 1) : d), 0);
+      const name = /(?:const|let|var)\s+([\w$]+)\s*(?::[^=]*)?=\s*$/.exec(code.slice(lineStart, m.index!))?.[1];
+      const exported = /^\s*export\b/.test(code.slice(lineStart, m.index!)) || (!!name && new RegExp(`export\\s*\\{[^}]*\\b${name}\\b|export\\s+default\\s+${name}\\b`).test(code));
+      return { index: m.index!, started: depth === 0 && !exported };
+    });
+    const started = workers.find((w) => w.started);
+    if (!workers.length || (!started && !importers.length)) continue;
+    const worker = started ?? workers[0];
+    findings.push({
+      id: "common/worker-sigterm",
+      severity: started ? "error" : "warning",
+      file,
+      line: lineAt(text, worker.index),
+      message: started
+        ? "This BullMQ worker doesn't close on SIGTERM. Every deploy stops it in the middle of its jobs, and BullMQ reruns them after its stall check, or fails them once maxStalledCount is used up."
+        : `This file makes a BullMQ worker for other code to start, and neither it nor ${importers.join(", ")}, which import${importers.length === 1 ? "s" : ""} it, mentions SIGTERM. If the code that starts the worker doesn't close it on SIGTERM, every deploy stops it in the middle of its jobs.`,
+      error: "job stalled more than allowable limit",
+      fix: started
+        ? 'Add process.on("SIGTERM", async () => { await worker.close(); process.exit(0); }), and start the worker with node directly so the signal reaches it.'
+        : 'Check that the file that starts the worker closes it, as in process.on("SIGTERM", async () => { await worker.close(); process.exit(0); }).',
+      docs: `${DOCS}#make-jobs-safe-to-retry`,
+    });
+  }
+  const bullmq = deps.bullmq?.match(/(\d+)/)?.[1];
+  if (bullmq && Number(bullmq) >= 6 && !deps.ioredis && repo.sourceFiles().some((f) => /from\s+["']ioredis["']/.test(repo.read(f) ?? ""))) {
+    findings.push({
+      id: "common/bullmq-ioredis",
+      severity: "error",
+      file: "package.json",
+      message: "Code imports ioredis, and BullMQ 6 no longer installs it for you.",
+      error: "Cannot find package 'ioredis'",
+      fix: "npm install ioredis",
+    });
+  }
+  if (deps.bullmq) {
+    findings.push({
+      id: "common/redis-eviction",
+      severity: "manual",
+      message: "A Redis that evicts keys when its memory is full drops queued BullMQ jobs without an error.",
+      error: 'IMPORTANT! Eviction policy is allkeys-lru. It should be "noeviction"',
+      fix: 'Run redis-cli -u "$REDIS_URL" CONFIG GET maxmemory-policy (or check the provider\'s settings where CONFIG is disabled) and set it to noeviction.',
+    });
+  }
+  for (const file of repo.sourceFiles().filter((f) => /(^|\/)(scripts|cron|jobs)\//.test(f))) {
+    const text = repo.read(file) ?? "";
+    if (/new Queue\s*\(/.test(text) && /\.add\s*\(/.test(text) && !/\.close\s*\(/.test(text) && !/new Worker\s*\(/.test(text)) {
+      findings.push({
+        id: "common/cron-script-exit",
+        severity: "warning",
+        file,
+        line: lineOf(text, /new Queue\s*\(/),
+        message: "This script adds a job and never closes its queue, so its open Redis connection keeps the process running. Railway skips every later run of a cron service while one is still going, and Render delays them.",
+        fix: "await queue.close() and disconnect the Redis connection at the end of the script.",
+        docs: `${DOCS}#replace-scheduled-actions`,
+      });
+    }
+  }
+  return findings;
+}
+
+function databaseFindings(repo: Repo): Finding[] {
+  const findings: Finding[] = [];
+  const sqlFiles = repo.find(/\.sql$/);
+  const policy = sqlFiles.find((f) => /create\s+policy|enable\s+row\s+level\s+security/i.test(repo.read(f) ?? ""));
+  if (policy) {
+    findings.push({
+      id: "common/rls-role",
+      severity: "manual",
+      file: policy,
+      message: "The app uses row-level security, which Postgres skips for superusers, roles with BYPASSRLS, and the table's owner. Most hosts' default database user is one of those.",
+      fix: 'Run psql "<the URL your app uses>" -f scripts/db-check.sql from this skill, as the role the app connects with, and fix every row marked problem.',
+      docs: `${DOCS}#rewrite-permissions-and-shop-tenancy`,
+    });
+  }
+  const load = sqlFiles.find((f) => /create\s+temp(orary)?\s+table/i.test(repo.read(f) ?? "") && /\\copy/i.test(repo.read(f) ?? ""));
+  if (load) {
+    findings.push({
+      id: "common/load-direct-connection",
+      severity: "manual",
+      file: load,
+      message: "This load script keeps a temporary table between statements, which a pooler in transaction mode can hand to another connection.",
+      error: 'relation "widget_import" does not exist',
+      fix: "Run it over the database's direct URL, not the pooled one. See the pooler table in common.md for each provider's direct URL.",
+      docs: `${DOCS}#load-your-records`,
+    });
+  }
+  return findings;
+}
+
+// A queue that request handlers add to, built on a connection with maxRetriesPerRequest: null. That
+// setting makes each command wait for Redis, so during an outage a webhook's add outlasts Shopify's
+// 5 seconds instead of failing.
+const ROUTE = /(^|\/)app\/routes\//;
+function requestQueueFindings(repo: Repo): Finding[] {
+  if (!repo.dependencies().bullmq) return [];
+  const findings: Finding[] = [];
+  const files = repo.sourceFiles();
+  const resolve = (from: string, specifier: string) => {
+    const base = new URL(specifier, `file:///${from}`).pathname.slice(1).replace(/\.(js|mjs)$/, "");
+    return [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}/index.ts`].find((c) => repo.exists(c));
+  };
+  for (const file of files) {
+    const text = repo.read(file) ?? "";
+    if (!/new Queue\s*\(/.test(text) || !/maxRetriesPerRequest\s*:\s*null/.test(text)) continue;
+    const code = mask(text, false);
+    const blocking = new Set([...code.matchAll(/\b(?:const|let|var)\s+(\w+)\s*=\s*new\s+(?:IORedis|Redis)\s*\(([^;]*?maxRetriesPerRequest\s*:\s*null[^;]*)\)/g)].map((m) => m[1]));
+    for (const m of code.matchAll(/\b(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*new\s+Queue\s*\(/g)) {
+      const open = m.index! + m[0].length - 1;
+      const args = text.slice(open, closing(text, open) + 1);
+      const conn = /\bconnection\s*(?::\s*(\w+))?\s*[,}]/.exec(args);
+      if (!conn || !blocking.has(conn[1] ?? "connection")) continue;
+      const queue = m[1];
+      const route = ROUTE.test(file)
+        ? file
+        : files.find((f) => ROUTE.test(f) && [...(repo.read(f) ?? "").matchAll(/import\s*\{([^}]*)\}\s*from\s*["'](\.{1,2}\/[^"']+)["']/g)].some((i) => new RegExp(`\\b${queue}\\b`).test(i[1]) && resolve(f, i[2]) === file));
+      if (!route) continue;
+      findings.push({
+        id: "common/request-queue-blocking",
+        severity: "warning",
+        file,
+        line: lineAt(text, m.index!),
+        message: `${queue} adds jobs from ${route === file ? "this route" : route} through a connection with maxRetriesPerRequest: null, which waits for Redis to come back. During a Redis outage the add outlasts Shopify's 5-second webhook timeout instead of failing, and Shopify retries a webhook the handler may already have half done.`,
+        fix: `Give request handlers their own connection, { enableOfflineQueue: false, maxRetriesPerRequest: 1 }, and keep maxRetriesPerRequest: null for workers, as app/queues.server.ts in ${REF} does.`,
+      });
+    }
+  }
+  return findings;
+}
+
+export const common: CheckModule = {
+  platform: "common",
+  title: "Every host",
+  detect: () => true,
+  run: (repo) => [...appUrlFindings(repo), ...prismaFindings(repo), ...dockerfileFindings(repo), ...workerFindings(repo), ...requestQueueFindings(repo), ...databaseFindings(repo)],
+};

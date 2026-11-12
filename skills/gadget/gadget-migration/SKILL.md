@@ -1,6 +1,6 @@
 ---
 name: gadget-migration
-description: Move a Gadget app to another platform, such as Shopify's React Router template on Cloud Run, Render, Fly.io, or Vercel, or Supabase, Convex, or AWS. Use when exporting records from Gadget, mapping Gadget models and fields to Postgres, Prisma, or Drizzle, porting actions (run and onSuccess), background actions (api.enqueue), and scheduled actions to BullMQ, Cloud Tasks, Inngest, Trigger.dev, or cron, rebuilding shop tenancy (Gelly filters to row-level security), rebuilding the Shopify connection (webhook HMAC verification, app proxy signatures, session tokens, duplicate and out-of-order webhooks, reconciliation, expiring offline token refresh and handoff), replacing @gadgetinc/react hooks, moving BigCommerce apps, apps without Shopify, outside API callers, search, file uploads, live queries, and computed views, setting up migrations and development environments, or planning the cutover. Also use for verifying Shopify webhooks, app proxy requests, or session tokens outside Gadget.
+description: Move a Gadget app to another platform, such as Vercel, Render, Railway, Fly.io, Google Cloud, Supabase, Cloudflare Workers, AWS, Azure, or Convex, with Hookdeck, Inngest, Trigger.dev, BullMQ, or Cloud Tasks for webhooks and jobs. Use when exporting records from Gadget, mapping models to Postgres, Prisma, or Drizzle, porting actions (run and onSuccess), background actions (api.enqueue), and scheduled actions, rebuilding shop tenancy (Gelly filters to row-level security) or the Shopify connection (webhook HMAC, app proxy signatures, session tokens, duplicate and out-of-order webhooks, reconciliation, offline token handoff), replacing @gadgetinc/react hooks, moving BigCommerce or non-Shopify apps, outside API callers, search, file uploads, live queries, computed views, or planning the cutover. Also use to check the new app (render.yaml, fly.toml, wrangler, vercel.json, Dockerfile, database roles) for pitfalls, debug deploy, worker, or pooler errors after the move, or verify Shopify webhooks outside Gadget.
 ---
 
 # Moving a Gadget app to another platform
@@ -22,7 +22,7 @@ node path/to/skills/gadget-migration/scripts/inventory.ts . > MIGRATION_INVENTOR
 
 ## Order of work
 
-1. **Choose the platform.** Each part of the app needs a replacement: database, job queue, scheduler, sign-in, file storage, email, search. Put the database in the same region as the servers: Gadget ran them side by side, so code that makes many small queries per request pays a longer round trip on each one when they are apart.
+1. **Choose the platform.** Each part of the app needs a replacement: database, job queue, scheduler, sign-in, file storage, email, search. Put the database in the same region as the servers: Gadget ran them side by side, so code that makes many small queries per request pays a longer round trip on each one when they are apart. Once it's chosen, read [references/platforms/common.md](references/platforms/common.md) and the platform's file below, and run `scripts/preflight.ts` on the new app after each step.
 2. **Map the schema and export data.** [references/schema-mapping.md](references/schema-mapping.md), [references/data-export.md](references/data-export.md)
 3. **Port actions.** [references/actions-and-transactions.md](references/actions-and-transactions.md)
 4. **Port background and scheduled actions.** [references/background-jobs.md](references/background-jobs.md)
@@ -31,6 +31,23 @@ node path/to/skills/gadget-migration/scripts/inventory.ts . > MIGRATION_INVENTOR
 7. **Replace the frontend client.** [references/frontend.md](references/frontend.md)
 8. **Move users and sign-in.** [references/users-and-auth.md](references/users-and-auth.md)
 9. **Cut over.** [references/cutover.md](references/cutover.md). Read it before step 1 as well: its "Before the day" list has work that takes days, such as Shopify's IP allowlist, the email sending domain, and the URLs other services call.
+
+Read the platform's reference alongside the steps. Each has checks to run, the errors you'll see and their fixes, and complete config and worker files, with links to Gadget's guide for that platform. Start with [references/platforms/common.md](references/platforms/common.md), which covers the pitfalls every host shares. Each vendor publishes its own skill for platform basics; load it alongside ours, which covers only what changes because the app came from Gadget:
+
+| Platform or service | Reference | Vendor's skill |
+|---|---|---|
+| Vercel | [references/platforms/vercel.md](references/platforms/vercel.md) | `vercel-schedules`, `vercel-functions` in [vercel/vercel-plugin](https://github.com/vercel/vercel-plugin) |
+| Render | [references/platforms/render.md](references/platforms/render.md) | `render-deploy` in [render-oss/skills](https://github.com/render-oss/skills) |
+| Railway | [references/platforms/railway.md](references/platforms/railway.md) | `use-railway` in [railwayapp/railway-skills](https://github.com/railwayapp/railway-skills) |
+| Fly.io | [references/platforms/fly-io.md](references/platforms/fly-io.md) | `fly` in [superfly/skills](https://github.com/superfly/skills) |
+| Google Cloud: Cloud Run, Cloud Tasks, Cloud SQL | [references/platforms/google-cloud.md](references/platforms/google-cloud.md) | `cloud-run-basics`, `cloud-sql-basics` in [google/skills](https://github.com/google/skills) |
+| AWS: ECS on Fargate, RDS, SQS, EventBridge Scheduler | [references/platforms/aws.md](references/platforms/aws.md) | `aws-containers`, `aws-database`, `aws-messaging-and-streaming` in [aws/agent-toolkit-for-aws](https://github.com/aws/agent-toolkit-for-aws) |
+| Azure: Container Apps, Service Bus, Flexible Server | [references/platforms/azure.md](references/platforms/azure.md) | `azure-messaging`, `azure-storage` in [microsoft/azure-skills](https://github.com/microsoft/azure-skills) |
+| Supabase | [references/platforms/supabase.md](references/platforms/supabase.md) | `supabase` in [supabase/agent-skills](https://github.com/supabase/agent-skills) |
+| Cloudflare Workers, Hyperdrive, Workflows | [references/platforms/cloudflare.md](references/platforms/cloudflare.md) | `cloudflare`, `wrangler` in [cloudflare/skills](https://github.com/cloudflare/skills) |
+| Hookdeck for Shopify webhooks | [references/platforms/hookdeck.md](references/platforms/hookdeck.md) | `event-gateway` in [hookdeck/agent-skills](https://github.com/hookdeck/agent-skills) |
+| Inngest for background jobs | [references/platforms/inngest.md](references/platforms/inngest.md) | `inngest-setup` in [inngest/inngest-skills](https://github.com/inngest/inngest-skills) |
+| Trigger.dev for background jobs | [references/platforms/trigger-dev.md](references/platforms/trigger-dev.md) | `trigger-setup`, `trigger-tasks` in [triggerdotdev/skills](https://github.com/triggerdotdev/skills) |
 
 Use these when the inventory lists the feature:
 
@@ -69,6 +86,9 @@ Plan around these. They are true today and may change:
 ## Files in this skill
 
 - `scripts/inventory.ts`: the inventory above
+- `scripts/preflight.ts`: checks the new app's code and config (`render.yaml`, `fly.toml`, `wrangler.jsonc`, `vercel.json`, `.railway/railway.ts`, ECS task definitions, `gcloud`, `aws`, and `az` scripts, the Dockerfile, Prisma migrations, Supabase migrations, Inngest and Trigger.dev code) for the pitfalls in `references/platforms/`, with the error each one causes and its fix. Node 22.18+ or 23.6+, no dependencies: `node scripts/preflight.ts path/to/new-app`
+- `scripts/db-check.sql`: run with `psql "$DATABASE_URL" -f scripts/db-check.sql` as the app's own role. It reports a role that skips row-level security, tables it owns, tables with no policy for it, pgvector it can't reach, a pooler in the way, and the connection limit.
 - `assets/shopify-signatures.ts`: webhook HMAC, OAuth `hmac`, app proxy `signature`, and session token verification with Web Crypto only. Copy it into the new app unchanged.
 - `assets/bigcommerce-signed-payload.ts`: verifies BigCommerce's `signed_payload_jwt` with Web Crypto only.
 - `references/*.md`: one file per step, each with code and the pitfalls that step tends to hit
+- `references/platforms/*.md`: one file per platform or service with a Gadget guide, plus `common.md` for what they share

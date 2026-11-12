@@ -1,0 +1,15 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// embeddings live in Vectorize, keyed by the product's id, instead of an Unsupported("vector(1536)") field
+model Product {
+  id     String @id
+  shopId String
+}
