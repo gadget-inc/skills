@@ -198,7 +198,7 @@ This job deletes rows for every store. If the tables have a shop policy, it need
 
 ## Moving jobs at cutover
 
-Let Gadget finish the background actions already queued, and watch the Queues dashboard in the Gadget editor until it is empty. Ones with a future `startAt` wait until that time, so create them again in the new queue. Turn off Gadget's scheduler triggers when the new cron jobs start, so each job runs in one place.
+Let Gadget finish the background actions already queued, until its **Queues** dashboard is empty. Ones with a future `startAt` wait until that time, so create them again in the new queue and cancel them in Gadget's **Queues** dashboard. Turn off Gadget's scheduler triggers when the new cron jobs start, so each job runs in one place.
 
 ## Common pitfalls
 
