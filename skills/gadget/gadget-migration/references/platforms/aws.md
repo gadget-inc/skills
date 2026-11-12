@@ -268,7 +268,7 @@ export async function enqueue(queueUrl: string, job: string, payload: unknown, o
 }
 ```
 
-A one-time schedule is deleted once it runs, so the same id can start a new job after that, where Gadget dropped repeats for a day. A job sent to a FIFO queue can't have a delay at all, so a store's `startAt` job always goes through a schedule, and the schedule's target then needs `SqsParameters` with a `MessageGroupId`.
+A one-time schedule is deleted once it runs, so the same id can start a new job after that, where Gadget dropped repeats until a day after the first job succeeded. A job sent to a FIFO queue can't have a delay at all, so a store's `startAt` job always goes through a schedule, and the schedule's target then needs `SqsParameters` with a `MessageGroupId`.
 
 ### The scheduled job, safe to run twice or at once
 

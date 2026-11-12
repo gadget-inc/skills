@@ -97,8 +97,8 @@ for name in my-app-web my-app-worker; do
   grant_on_account "$(sa "$name")" "$(sa "$name")" roles/iam.serviceAccountTokenCreator     # signed URLs without a key file
   gcloud secrets add-iam-policy-binding database-url --project="$PROJECT" --member="serviceAccount:$(sa "$name")" --role=roles/secretmanager.secretAccessor --quiet >/dev/null
   gcloud secrets add-iam-policy-binding shopify-api-secret --project="$PROJECT" --member="serviceAccount:$(sa "$name")" --role=roles/secretmanager.secretAccessor --quiet >/dev/null
-  gcloud storage buckets add-iam-policy-binding "$BUCKET" --member="serviceAccount:$(sa "$name")" --role=roles/storage.objectViewer >/dev/null   # signed reads
-  gcloud storage buckets add-iam-policy-binding "$BUCKET" --member="serviceAccount:$(sa "$name")" --role=roles/storage.objectCreator >/dev/null  # signed uploads
+  # signed reads and uploads; Object User, not Viewer plus Creator, so an upload to a key in use can replace the file
+  gcloud storage buckets add-iam-policy-binding "$BUCKET" --member="serviceAccount:$(sa "$name")" --role=roles/storage.objectUser >/dev/null
 done
 
 # only the migration job reads postgres's URL, as its own account; the services read app_user's from database-url
