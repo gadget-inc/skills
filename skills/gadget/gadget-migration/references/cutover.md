@@ -40,13 +40,15 @@ The deploy doesn't deploy your server. The new app must already be running at th
 
 Shopify requires every public app to have an IP allowlist, and requests from outside it get `403`. Apps without one lose bulk operations from 12 November 2026 and all Admin API access from 1 April 2027. Gadget's guide has apps allow Google Cloud's network, ASN `396982`, in the United States.
 
-The allowlist holds either IP addresses or networks (ASNs), not both. While Gadget still calls Shopify, the list has to stay on ASNs, so add the new host as an ASN too, even if it gives you a static IP:
+One allowlist holds IP addresses and ranges as well as networks (ASNs). Shopify checks the listed addresses first, and looks up the ASN and country of every other request. So keep `396982` while Gadget still calls Shopify, and add the new host next to it:
 
-1. Find the network the new host calls from. Send one request from it to any service that shows your IP address, and look that address up in a public ASN registry. Don't assume it from the host's name: a host that runs on another cloud calls from that cloud's network.
-2. In the Dev Dashboard, open the app, click **Settings**, then **Manage** in the **IP allowlist** section. Add the ASN next to `396982`, and add the country the host runs in. The country list applies to every ASN on the list.
+1. Find the address the new host calls from. Send one request from it to any service that shows your IP address, such as `curl -s https://checkip.amazonaws.com` in a one-off job, and send it from more than one instance.
+2. In the Dev Dashboard, open the app, click **Settings**, then **Manage** in the **IP allowlist** section.
+   - **The host gives you fixed outbound addresses**, such as a NAT gateway's or a static egress IP: add them as addresses, including any IPv6 address the host calls Shopify from. You don't need their ASN. An address only your app uses lets only your servers use a stolen token, where an ASN such as Amazon's `16509` lets every customer on that network use it.
+   - **It doesn't:** look the address up in a public ASN registry, such as `whois -h whois.cymru.com " -v <address>"`, and add that ASN and the country the host runs in. Don't assume the network from the host's name: a host that runs on another cloud calls from that cloud's network. The country list narrows only the ASNs, never the addresses.
 3. Click **Run test** under **Test against recent traffic**. It checks the last 30 days of requests, so it shows Gadget's traffic passing. It can't show the new host until the new host has called Shopify, so run it again after the backfill starts.
 
-Shopify allows up to 10 ASNs and 10 countries. Google Cloud Run in the United States is already covered by `396982`.
+Shopify allows up to 250 addresses or ranges, 10 ASNs, and 10 countries. Google Cloud Run in the United States is already covered by `396982`.
 
 After the Gadget app is deleted, tighten the list: remove `396982` unless the new host is on Google Cloud, or switch the list to the new host's static IP addresses (up to 100 addresses or ranges).
 
