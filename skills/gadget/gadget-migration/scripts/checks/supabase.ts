@@ -495,7 +495,7 @@ function codeFindings(repo: Repo): Finding[] {
       line: lineAt(text, match.index!),
       message: "This Edge Function calls Shopify's Admin API. Edge Functions send requests from no fixed or published network, so the call fails once your app's IP allowlist is enforced.",
       error: "403 from Shopify's Admin API",
-      fix: "Make Shopify calls from your Node host, whose ASN is on the allowlist, and have the Edge Function add a job for it instead.",
+      fix: "Make Shopify calls from your Node host, whose addresses or ASN are on the allowlist, and have the Edge Function add a job for it instead.",
       docs: `${GUIDE}#ip-allowlists`,
     });
   }

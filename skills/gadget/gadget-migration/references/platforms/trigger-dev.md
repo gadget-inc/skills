@@ -32,7 +32,7 @@ node path/to/skills/gadget-migration/scripts/preflight.ts path/to/new-app --plat
 | `trigger-dev/db-client-in-run` | `new PrismaClient()` or `new Pool()` inside `run`, which opens a pool on every run. |
 | `trigger-dev/env-vars` | The variables your tasks read. Trigger.dev doesn't see the host's. |
 | `trigger-dev/on-failure-gaps` | `onFailure` hooks. They skip crashed, system-failed, timed-out, and canceled runs. |
-| `trigger-dev/shopify-from-tasks` | A task file that calls the Shopify Admin API, directly or through a module it imports. Tasks call from Trigger.dev's machines, so the ASN you add to Shopify's IP allowlist for your host doesn't cover them. |
+| `trigger-dev/shopify-from-tasks` | A task file that calls the Shopify Admin API, directly or through a module it imports. Tasks call from Trigger.dev's machines, so the addresses or ASN you add to Shopify's IP allowlist for your host don't cover them. |
 
 What the script can't see:
 
@@ -51,7 +51,7 @@ What the script can't see:
 | A run stays `QUEUED` and never starts | Triggered with another environment's key, or a negative `priority` on an empty queue | Use the environment's key; pass `0` for `low`. A run with no priority counts as 0, so `default` needs `300` |
 | A second trigger with the same `idempotencyKey` starts a new run | The first run failed, which clears the key, or the TTL ran out | Expected. Gadget kept a failed job's id for 7 days, so make the job safe to run twice |
 | Two tasks on one shared limit run 8 jobs for one store at once | A named `concurrencyLimit()` that isn't enforced, as on self-hosted 4.8.3 | Share a `queue({ concurrencyLimit })`, as below |
-| `403` from Shopify's Admin API in a task run, while the same call from your server succeeds | Shopify's IP allowlist is enforced, and it has your host's ASN but not that of Trigger.dev's addresses | Add the ASN and country of the addresses on the dashboard's **Regions** page next to your host's (`trigger-dev/shopify-from-tasks`, [Call Shopify from your tasks](https://docs.gadget.dev/guides/moving-to-another-platform/trigger-dev#call-shopify-from-your-tasks)) |
+| `403` from Shopify's Admin API in a task run, while the same call from your server succeeds | Shopify's IP allowlist is enforced, and it covers your host but not Trigger.dev's machines | Add the static addresses on the dashboard's **Regions** page as addresses next to your host's entries, or, with no static addresses, the ASN and country Trigger.dev confirms your tasks call from (`trigger-dev/shopify-from-tasks`, [Call Shopify from your tasks](https://docs.gadget.dev/guides/moving-to-another-platform/trigger-dev#call-shopify-from-your-tasks)) |
 | `@prisma/client did not initialize yet` in a run | The deployed image has no generated Prisma client | `prismaExtension({ mode: "legacy", schema: "prisma/schema.prisma" })` in `build.extensions` |
 
 ## Complete examples
@@ -291,7 +291,7 @@ if (process.argv[1]?.endsWith("requeue-scheduled-jobs.ts") && process.argv[2]) {
 The order in [cutover.md](../cutover.md) and the guide's [Cut over to the new platform](https://docs.gadget.dev/guides/moving-to-another-platform/trigger-dev#cut-over-to-the-new-platform) hold. What changes with Trigger.dev:
 
 - **Before the day:** deploy the tasks to production with no declarative `cron`, and check that `schedules.list()` with the production key returns nothing active.
-- **Allow your new host to call Shopify:** add the ASN and country of Trigger.dev's addresses next to your host's, as [Call Shopify from your tasks](https://docs.gadget.dev/guides/moving-to-another-platform/trigger-dev#call-shopify-from-your-tasks) describes, and run Shopify's allowlist test again after the tasks' first calls.
+- **Allow your new host to call Shopify:** add Trigger.dev's static addresses next to your host's entries and Gadget's ASN, as [Call Shopify from your tasks](https://docs.gadget.dev/guides/moving-to-another-platform/trigger-dev#call-shopify-from-your-tasks) describes, and run Shopify's allowlist test again after the tasks' first calls.
 - **Move scheduled work:** turn off Gadget's scheduler triggers, then run `scripts/attach-schedules.ts` and `scripts/requeue-scheduled-jobs.ts` with the production key.
 - **Deploys during the move:** a run uses the version deployed when it started, and so do its retries, so a fix deploys for new runs only. Replay old runs from the dashboard.
 - **Moving back:** `node scripts/attach-schedules.ts --detach`, then turn Gadget's scheduler triggers back on. Delayed runs already triggered still run; cancel them with `runs.cancel(id)`.

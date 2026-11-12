@@ -50,7 +50,7 @@ psql "$DATABASE_URL" -f path/to/skills/gadget-migration/scripts/db-check.sql
 Three checks need the host itself:
 
 - **Redis eviction:** `redis-cli -u "$REDIS_URL" CONFIG GET maxmemory-policy` should print `noeviction`. Managed Redis that disables `CONFIG` shows it in its settings instead.
-- **The egress address and its network:** run `curl -s https://checkip.amazonaws.com` on the host, such as in a one-off job, then `whois -h whois.cymru.com " -v <address>"`. Plain `whois` leaves the ASN empty for AWS addresses. Add the ASN and country to Shopify's IP allowlist next to Gadget's ASN, `396982`, as [IP allowlists](https://docs.gadget.dev/guides/moving-to-another-platform#ip-allowlists) explains.
+- **The egress address:** run `curl -s https://checkip.amazonaws.com` on the host, such as in a one-off job. If the host gives you fixed outbound addresses, add them to Shopify's IP allowlist as addresses next to Gadget's ASN, `396982`, and skip the ASN. Only when it doesn't, find the address's network with `whois -h whois.cymru.com " -v <address>"` (plain `whois` leaves the ASN empty for AWS addresses) and add that ASN and the country, as [IP allowlists](https://docs.gadget.dev/guides/moving-to-another-platform#ip-allowlists) explains.
 - **The deployed app's environment:** compare `ggt var list` with the host's variable names before the switch. A worker or job runner that imports `shopify.server.ts` needs `SHOPIFY_API_KEY` and `SHOPIFY_APP_URL` too, or it fails at startup.
 
 ## Failure signatures
@@ -72,7 +72,7 @@ Three checks need the host itself:
 | `OOM command not allowed when used memory > 'maxmemory'` | Redis with `noeviction` is full | Expected with `noeviction`: the add fails loudly and can retry. Add memory |
 | `job stalled more than allowable limit` | A worker was killed mid-job more than `maxStalledCount` times, usually by deploys | Close workers on `SIGTERM` and give the host a drain time longer than your longest job |
 | `Detected an empty appUrl configuration`, then `Missing values for: apiKey` | A process that imports `shopify.server.ts` is missing `SHOPIFY_APP_URL` or `SHOPIFY_API_KEY` | Set the Shopify variables on every service that runs the image |
-| `403` from Shopify's Admin API after enforcement | The IP allowlist doesn't include the host's network or country | Add the ASN and country, or run the job on the host |
+| `403` from Shopify's Admin API after enforcement | The IP allowlist has neither the host's fixed address nor its network and country | Add the host's fixed outbound addresses, or its ASN and country when it has none, or run the job on the host |
 
 ## Complete examples
 

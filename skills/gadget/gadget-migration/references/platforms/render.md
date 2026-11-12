@@ -37,7 +37,7 @@ Three checks need Render itself:
 
 - **The worker heard its eviction warning:** `render logs --resources <worker-service-id> --text "Eviction policy" --limit 5` prints nothing on a correct Key Value. BullMQ logs the warning once per connection.
 - **A limit that must hold during deploys:** `render kv-cli my-app-queue`, then `HGET bull:external:meta concurrency`. It prints the global concurrency, or nothing when the only limit is each worker's `concurrency` option, which the deploy overlap doubles.
-- **Outbound addresses for Shopify's allowlist:** the service's **Connect** > **Outbound** tab, looked up as [IP allowlists](https://docs.gadget.dev/guides/moving-to-another-platform/render#ip-allowlists) shows.
+- **Outbound addresses for Shopify's allowlist:** the service's **Connect** > **Outbound** tab lists them. Add them as addresses or ranges next to Gadget's ASN; they need no ASN or country ([IP allowlists](https://docs.gadget.dev/guides/moving-to-another-platform/render#ip-allowlists)).
 
 ## Failure signatures
 

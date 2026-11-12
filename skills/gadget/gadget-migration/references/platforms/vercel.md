@@ -32,7 +32,7 @@ node path/to/skills/gadget-migration/scripts/preflight.ts path/to/new-app --plat
 Three more that the script can't see:
 
 - **Function region and database region.** The function region is `iad1` unless `vercel.json` sets `regions`. Neon's console shows the database's, which should be AWS `us-east-1` for `iad1`.
-- **Static IPs.** Settings > Networking lists them. Look up each address's ASN with `whois -h whois.cymru.com " -v 203.0.113.10"` for Shopify's allowlist, as [IP allowlists](https://docs.gadget.dev/guides/moving-to-another-platform/vercel#ip-allowlists) describes. They cover your Vercel functions only, not tasks that a hosted queue such as Trigger.dev runs on its own machines; see [trigger-dev.md](trigger-dev.md).
+- **Static IPs.** Settings > Networking lists them. Add them to Shopify's allowlist as addresses next to Gadget's ASN, with no ASN or country of their own, as [IP allowlists](https://docs.gadget.dev/guides/moving-to-another-platform/vercel#ip-allowlists) describes. They cover your Vercel functions only, not tasks that a hosted queue such as Trigger.dev runs on its own machines; see [trigger-dev.md](trigger-dev.md).
 - **Duplicate and late schedule runs.** `vercel schedules executions list prune-audit-logs` lists each run with its execution id.
 
 ## Failure signatures
@@ -120,7 +120,7 @@ Run through PgBouncer in transaction mode against Postgres 18: two concurrent ca
 The order in [cutover.md](../cutover.md) and the guide's [Cut over to the new platform](https://docs.gadget.dev/guides/moving-to-another-platform/vercel#cut-over-to-the-new-platform) holds. On Vercel:
 
 - **Schedules start with the deploy that declares them.** A production schedule is active as soon as a production deployment has it, and keeps an enabled or disabled state across deployments. Add `schedules` in the "Move scheduled work" deploy, or deploy it early and run `vercel schedules disable prune-audit-logs`, then `vercel schedules enable prune-audit-logs` at the switch. Custom environments have their own schedules: `vercel schedules list --environment staging`.
-- **Static IPs before the allowlist.** Turn them on, look up their ASN, and add it with the United States for `iad1` before **Allow your new host to call Shopify**.
+- **Static IPs before the allowlist.** Turn them on and add the addresses next to Gadget's ASN before **Allow your new host to call Shopify**. Without them, add the ASN and country that `checkip.amazonaws.com` shows from a function instead ([common.md](common.md)).
 - **`shopify.app.toml` names the production domain**, never a deployment URL. `vercel/deployment-url` catches it.
 - **Rollback.** An Instant Rollback moves the domain and that deployment's schedules back, not your migrations. After it, pushes to the production branch stop going live until `vercel promote <deployment-url>`.
 

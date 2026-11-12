@@ -366,9 +366,9 @@ function shopifyFromTaskFindings(repo: Repo, tasks: TaskDef[]): Finding[] {
       severity: "manual",
       file,
       line: lineAt(text, first.index),
-      message: `This task file calls the Shopify Admin API${first.via ? ` through ${first.via}` : ""}. Tasks run on Trigger.dev's machines, so the ASN you add to Shopify's IP allowlist for your host doesn't cover these calls, and Shopify answers them with 403 once the allowlist is enforced.`,
+      message: `This task file calls the Shopify Admin API${first.via ? ` through ${first.via}` : ""}. Tasks run on Trigger.dev's machines, so the addresses or ASN you add to Shopify's IP allowlist for your host don't cover these calls, and Shopify answers them with 403 once the allowlist is enforced.`,
       error: "403",
-      fix: 'Look up the addresses on the Trigger.dev dashboard\'s Regions page, find their ASN and country with whois -h whois.cymru.com " -v <address>", and add both to the allowlist next to your host\'s before you turn on enforcement. Run Shopify\'s allowlist test again after the tasks make their first calls.',
+      fix: 'Add the static addresses on the Trigger.dev dashboard\'s Regions page to the allowlist as addresses next to your host\'s entries before you turn on enforcement. With no static addresses, add the ASN and country Trigger.dev confirms your tasks call from. Run Shopify\'s allowlist test again after the tasks make their first calls.',
       docs: `${GUIDE}#call-shopify-from-your-tasks`,
     });
   }
